@@ -1,0 +1,35 @@
+# ============================================================
+#  Phase 1（语料入库）不需要任何第三方依赖 —— 只用 Python 标准库。
+#  所以你现在就能 `python ingest.py`，不用等 pip 装完。
+#
+#  Phase 2 开始（向量检索 / 重排 / 界面）才需要下面这些。
+#  需要时执行：  pip install -r requirements.txt
+# ============================================================
+
+# ---- 嵌入与重排（Phase 2）----
+# bge-m3：中英文都强，且原生同时输出 dense + sparse 向量，
+#         一个模型就能撑起「稠密 + 稀疏」混合检索，8G 显存跑得动。
+sentence-transformers>=3.0
+FlagEmbedding>=1.2.11
+
+# ---- 向量库（Phase 2）----
+# 单机 Docker 一条命令起，原生支持 sparse vector 与 payload 过滤。
+qdrant-client>=1.12
+
+# ---- 服务与界面（Phase 4）----
+fastapi>=0.115
+uvicorn>=0.30
+streamlit>=1.38
+
+# ---- 其他语料解析器（Phase 2+，先用 Markdown 语料跑通再说）----
+pymupdf>=1.24          # PDF 基础解析
+trafilatura>=1.12      # 网页正文抽取（公众号 / 博客剪藏）
+arxiv>=2.1             # 批量拉 arXiv 论文元数据
+
+# ---- 工具 ----
+tqdm>=4.66
+pyyaml>=6.0
+
+# ---- 暂不安装（体积大、显存要求高，等语料真的需要 PDF 公式表格再说）----
+# mineru>=2.0          # 中文 PDF 版面分析 + 公式/表格识别，效果最好但很重
+# paddleocr>=2.7       # 扫描件 OCR

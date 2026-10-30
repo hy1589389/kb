@@ -1,0 +1,57 @@
+# ============================================================
+#  本地知识库配置
+#  改完直接重跑 ingest.py 即可，无需改代码。
+#  chunk 这几个数字是你后续做对照实验的旋钮，别拍脑袋定死。
+# ============================================================
+
+[path]
+raw_dir = "data/raw"          # git clone 下来的语料仓库都放这里
+out_dir = "data/processed"    # 切块结果 JSONL + stats.json
+
+[chunk]
+max_chars = 1200    # 单块目标上限（字符）。中文 1200 字约 1200 token
+min_chars = 120      # 低于此值的块，尝试与同父标题的相邻块合并
+drop_below = 40     # 合并后仍低于此值则丢弃（通常是残留占位）
+overlap = 120       # 超长章节二次切分时，块首补上的上文字符数
+code_block_max_chars = 2400   # 代码块超过此值就在空行处拆开
+                              # （实测 self-llm 里有 56KB 的 base64 示例代码块，
+                              #   不拆的话既超嵌入上下文又永远检索不到）
+
+[filter]
+# 这些目录里的 Markdown 对检索没有价值，直接跳过
+skip_dirs = [
+  ".git", ".github", ".vuepress", ".idea", ".vscode",
+  "node_modules", "assets", "images", "img", "static",
+  "public", "media", "fonts", "dist", "build",
+]
+
+# 文件名（小写、含扩展名）命中则跳过
+skip_files = [
+  "license", "license.md", "changelog", "changelog.md",
+  "contributing.md", "code_of_conduct.md", "notice",
+]
+
+# ============================================================
+#  Phase 2 · 检索
+#  建索引：python ingest.py index --chunks <chunks.jsonl>
+#  查  询：python ingest.py search "查询词"
+# ============================================================
+
+[retrieval]
+index_dir = "data/index"                  # 索引输出目录（相对项目根）
+model_dir = "models/bge-m3"               # bge-m3 ONNX 目录；留空 "" 表示没有
+reranker_dir = "models/bge-reranker-base" # 留空则 --rerank 自动跳过
+
+# 批大小对速度影响极大，但方向和直觉相反：
+#   CPU      上 16 比 1 快 3~5 倍
+#   DirectML 上 4 最快（实测 7.6 块/秒），16 反而降到 5.6 —— 4GB 显存塞不下更大的批
+embed_batch_size = 4     # 用显卡时取 4；只有 CPU 时改成 16
+embed_max_length = 512   # bge-m3 支持 8192，但 CPU 上一次 8192 要几十秒
+
+# 各路召回多少条，融合后留多少，最终返回多少
+dense_top_k = 50         # 稠密那一路的候选数
+sparse_top_k = 50        # BM25 那一路的候选数
+fusion_top_k = 50        # RRF 融合后进入重排的候选数（交叉编码器成本正比于此）
+final_top_k = 10         # 默认返回条数，可被 search --top-k 覆盖
+rrf_k = 60               # RRF 平滑常数，论文推荐 60
+use_reranker = false     # 默认不重排：CPU 上重排 50 条要 2~5 秒

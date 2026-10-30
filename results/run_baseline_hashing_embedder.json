@@ -1,0 +1,1530 @@
+{
+  "config": {
+    "questions": "G:\\DeepSeek_Harness\\.kb-phase2\\work\\eval\\questions.jsonl",
+    "index_dir": ".scratch\\index_hashing",
+    "n_questions_total": 40,
+    "top_k": 10,
+    "use_dense": true,
+    "use_sparse": true,
+    "use_rerank": false,
+    "n_questions": 40,
+    "elapsed_sec": 0.2
+  },
+  "summary": {
+    "n": 40,
+    "ks": [
+      1,
+      3,
+      5,
+      10
+    ],
+    "mrr_k": 10,
+    "errors": [],
+    "recall": {
+      "1": 0.175,
+      "3": 0.375,
+      "5": 0.5,
+      "10": 0.625
+    },
+    "mrr@10": 0.30871031746031746,
+    "hit@1": 0.175,
+    "mean_rank": 3.4,
+    "by_difficulty": {
+      "easy": {
+        "n": 9,
+        "recall": {
+          "1": 0.2222222222222222,
+          "3": 0.4444444444444444,
+          "5": 0.5555555555555556,
+          "10": 0.7777777777777778
+        },
+        "mrr@10": 0.38932980599647266,
+        "hit@1": 0.2222222222222222,
+        "mean_rank": 3.7142857142857144
+      },
+      "medium": {
+        "n": 18,
+        "recall": {
+          "1": 0.1111111111111111,
+          "3": 0.3333333333333333,
+          "5": 0.5,
+          "10": 0.6111111111111112
+        },
+        "mrr@10": 0.26728395061728394,
+        "hit@1": 0.1111111111111111,
+        "mean_rank": 3.5454545454545454
+      },
+      "hard": {
+        "n": 13,
+        "recall": {
+          "1": 0.23076923076923078,
+          "3": 0.38461538461538464,
+          "5": 0.46153846153846156,
+          "10": 0.5384615384615384
+        },
+        "mrr@10": 0.31025641025641026,
+        "hit@1": 0.23076923076923078,
+        "mean_rank": 2.857142857142857
+      }
+    },
+    "by_category": {
+      "中英混杂": {
+        "n": 7,
+        "recall": {
+          "1": 0.14285714285714285,
+          "3": 0.2857142857142857,
+          "5": 0.2857142857142857,
+          "10": 0.42857142857142855
+        },
+        "mrr@10": 0.2380952380952381,
+        "hit@1": 0.14285714285714285,
+        "mean_rank": 3.0
+      },
+      "代码类": {
+        "n": 8,
+        "recall": {
+          "1": 0.0,
+          "3": 0.25,
+          "5": 0.375,
+          "10": 0.375
+        },
+        "mrr@10": 0.13541666666666666,
+        "hit@1": 0.0,
+        "mean_rank": 3.0
+      },
+      "同义改写": {
+        "n": 7,
+        "recall": {
+          "1": 0.14285714285714285,
+          "3": 0.42857142857142855,
+          "5": 0.7142857142857143,
+          "10": 0.8571428571428571
+        },
+        "mrr@10": 0.373015873015873,
+        "hit@1": 0.14285714285714285,
+        "mean_rank": 3.6666666666666665
+      },
+      "干扰项": {
+        "n": 5,
+        "recall": {
+          "1": 0.2,
+          "3": 0.4,
+          "5": 0.4,
+          "10": 0.4
+        },
+        "mrr@10": 0.26666666666666666,
+        "hit@1": 0.2,
+        "mean_rank": 2.0
+      },
+      "术语精确匹配": {
+        "n": 6,
+        "recall": {
+          "1": 0.3333333333333333,
+          "3": 0.5,
+          "5": 0.6666666666666666,
+          "10": 1.0
+        },
+        "mrr@10": 0.49232804232804234,
+        "hit@1": 0.3333333333333333,
+        "mean_rank": 4.166666666666667
+      },
+      "跨节综合": {
+        "n": 7,
+        "recall": {
+          "1": 0.2857142857142857,
+          "3": 0.42857142857142855,
+          "5": 0.5714285714285714,
+          "10": 0.7142857142857143
+        },
+        "mrr@10": 0.38571428571428573,
+        "hit@1": 0.2857142857142857,
+        "mean_rank": 3.2
+      }
+    },
+    "failures": [
+      {
+        "qid": "q006",
+        "question": "为什么扩容要重新计算哈希？扩容那次为什么是 O(n) 的代价，不是说哈希表插入是 O(1) 吗？",
+        "difficulty": "medium",
+        "category": "同义改写",
+        "note": "同义改写：问题说「重新计算哈希」「扩容那次」，正文用的词是 rehash 和「搬迁元素」，还给了摊还分析的答法。稀疏检索可能因为字面不匹配而漏掉。",
+        "gold": [
+          "a45d3f544ff8e8cc-0007-bb17be32"
+        ],
+        "gold_breadcrumbs": [
+          "负载因子和扩容  [a45d3f544ff8e8cc-0007-bb17be32]"
+        ],
+        "top_breadcrumbs": [
+          "Java 容器 > 三、源码分析 > HashMap > 6. 扩容-重新计算桶下标  [1c87c976932031b1-0031-8acc34f7]",
+          "高频问题自测  [a45d3f544ff8e8cc-0014-3d59aac1]",
+          "哈希表怎么工作？  [a45d3f544ff8e8cc-0005-15f9fa23]"
+        ],
+        "top_chunk_ids": [
+          "1c87c976932031b1-0031-8acc34f7",
+          "a45d3f544ff8e8cc-0014-3d59aac1",
+          "a45d3f544ff8e8cc-0005-15f9fa23"
+        ],
+        "error": ""
+      },
+      {
+        "qid": "q013",
+        "question": "HNSW 和 IVFFLAT 这两种向量索引分别适合什么场景？内存和召回率怎么取舍？",
+        "difficulty": "medium",
+        "category": "中英混杂",
+        "note": "中英混杂：HNSW / IVFFLAT / ef_search 全是英文术语。gold 一块是 JavaGuide rag-vector-store 里的索引算法对照表，一块是「HNSW 很吃内存，规模上去要考虑 IVFFLAT」的选型讨论。",
+        "gold": [
+          "0107cc392b978d26-0010-9ddb894b",
+          "0107cc392b978d26-0012-5fbfdbfd"
+        ],
+        "gold_breadcrumbs": [
+          "有哪些向量索引算法？  [0107cc392b978d26-0010-9ddb894b]",
+          "你的项目使用的什么向量索引算法？  [0107cc392b978d26-0012-5fbfdbfd]"
+        ],
+        "top_breadcrumbs": [
+          "向量数据库与索引  [deffff6ab25413a5-0002-3c740809]",
+          "总结  [0107cc392b978d26-0028-4e8fb959]",
+          "RAG 检索优化  [deffff6ab25413a5-0004-ddab12bb]"
+        ],
+        "top_chunk_ids": [
+          "deffff6ab25413a5-0002-3c740809",
+          "0107cc392b978d26-0028-4e8fb959",
+          "deffff6ab25413a5-0004-ddab12bb"
+        ],
+        "error": ""
+      },
+      {
+        "qid": "q016",
+        "question": "LeetCode 704 二分查找，左闭右闭区间那版的 C++ 代码怎么写？while 里为什么用 <= ？",
+        "difficulty": "medium",
+        "category": "代码类",
+        "note": "代码类：答案含 C++ 代码块与区间定义说明（leetcode-master）。问题额外带上「左闭右闭」是为了把两种写法区分开。",
+        "gold": [
+          "c996d1ec34ca478a-0004-b5c6fb3f"
+        ],
+        "gold_breadcrumbs": [
+          "704. 二分查找 > 思路 > 二分法第一种写法  [c996d1ec34ca478a-0004-b5c6fb3f]"
+        ],
+        "top_breadcrumbs": [
+          "704. 二分查找 > 其他语言版本 > **Kotlin:**  [c996d1ec34ca478a-0023-70564651]",
+          "34. 在排序数组中查找元素的第一个和最后一个位置 > 思路 > 寻找右边界  [1c3266c44521935e-0003-c13ae94a]",
+          "算法模板 > 其他语言版本 > TypeScript： > 二分查找法  [f7cbe77decfcf71f-0022-a89e6692]"
+        ],
+        "top_chunk_ids": [
+          "c996d1ec34ca478a-0023-70564651",
+          "1c3266c44521935e-0003-c13ae94a",
+          "f7cbe77decfcf71f-0022-a89e6692"
+        ],
+        "error": ""
+      },
+      {
+        "qid": "q020",
+        "question": "从一条 SQL 执行到查不出结果，索引失效的常见原因有哪些？LIKE 以 % 开头为什么用不上索引？",
+        "difficulty": "hard",
+        "category": "跨节综合",
+        "note": "跨节综合：JavaGuide 索引失效专题的「LIKE 以通配符开头」一节加「总结」一节的分类，再叠上覆盖索引文档里的最左前缀匹配原则，三块才够回答。",
+        "gold": [
+          "7d547b7e255a06c0-0005-07440018",
+          "7d547b7e255a06c0-0010-efc4e46c",
+          "52dd13d31f5da757-0019-e4666708"
+        ],
+        "gold_breadcrumbs": [
+          "LIKE 模糊查询以通配符开头  [7d547b7e255a06c0-0005-07440018]",
+          "总结  [7d547b7e255a06c0-0010-efc4e46c]",
+          "覆盖索引和联合索引 > 最左前缀匹配原则  [52dd13d31f5da757-0019-e4666708]"
+        ],
+        "top_breadcrumbs": [
+          "⭐️MySQL 索引 > 索引失效的原因有哪些？  [42da81c9acb760b6-0032-6ad639c2]",
+          "第二阶段：Java、MySQL 与 Redis > MySQL  [d219ab740a815511-0007-bd7f8177]",
+          "SQL 测试  [576dfc7806bd86ed-0005-ecbf479a]"
+        ],
+        "top_chunk_ids": [
+          "42da81c9acb760b6-0032-6ad639c2",
+          "d219ab740a815511-0007-bd7f8177",
+          "576dfc7806bd86ed-0005-ecbf479a"
+        ],
+        "error": ""
+      },
+      {
+        "qid": "q024",
+        "question": "Reverse Linked List 这道题，迭代和递归两种写法的时间、空间复杂度分别是多少？",
+        "difficulty": "hard",
+        "category": "干扰项",
+        "note": "干扰项：反转链表在 JavaGuide、CS-Notes、leetcode-master 三个仓库都有。问题用英文题名和复杂度提问，答案落在 JavaGuide 的复杂度讨论和指针过程示意两节，而不是任何一份具体题解。",
+        "gold": [
+          "06cffd50eb267121-0006-92374856",
+          "2549b58d1dedf4e6-0014-637fad30"
+        ],
+        "gold_breadcrumbs": [
+          "空间复杂度看什么？  [06cffd50eb267121-0006-92374856]",
+          "过程示意和边界样例  [2549b58d1dedf4e6-0014-637fad30]"
+        ],
+        "top_breadcrumbs": [
+          "递归算法的时间与空间复杂度分析！ > 总结  [bda95575b0e6a0c4-0008-c6d52281]",
+          "高频问题自测  [06cffd50eb267121-0008-12748691]",
+          "递归算法的时间与空间复杂度分析！  [bda95575b0e6a0c4-0001-ca1afb11]"
+        ],
+        "top_chunk_ids": [
+          "bda95575b0e6a0c4-0008-c6d52281",
+          "06cffd50eb267121-0008-12748691",
+          "bda95575b0e6a0c4-0001-ca1afb11"
+        ],
+        "error": ""
+      },
+      {
+        "qid": "q028",
+        "question": "RLHF 和 DPO 有什么区别？为什么说 DPO 不需要单独训练奖励模型？KTO 又是什么定位？",
+        "difficulty": "easy",
+        "category": "中英混杂",
+        "note": "中英混杂：RLHF / DPO / KTO 三个缩写原样出现在同一块（happy-llm 6.4.2 主流方法概览）。",
+        "gold": [
+          "3705094ccf749302-0040-211083a5"
+        ],
+        "gold_breadcrumbs": [
+          "第六章 大模型训练流程实践 > 6.4 偏好对齐 > 6.4.2 主流方法概览  [3705094ccf749302-0040-211083a5]"
+        ],
+        "top_breadcrumbs": [
+          "[8b359883cec1f57b-0005-71f1554c]",
+          "高频问题  [0c0287cda9dd16f0-0005-da304adb]",
+          "高频问题  [fb09ab79a3218915-0005-11516c70]"
+        ],
+        "top_chunk_ids": [
+          "8b359883cec1f57b-0005-71f1554c",
+          "0c0287cda9dd16f0-0005-da304adb",
+          "fb09ab79a3218915-0005-11516c70"
+        ],
+        "error": ""
+      },
+      {
+        "qid": "q029",
+        "question": "LLaMA2 里 GQA（分组查询注意力）是怎么实现的？n_kv_heads 和 n_rep 分别是什么，K/V 为什么要 repeat 到和 Q 一样多？",
+        "difficulty": "medium",
+        "category": "中英混杂",
+        "note": "中英混杂：GQA + n_kv_heads/n_rep 符号混排，答案跨 happy-llm 5.1.3.1 repeat_kv 与 5.1.3.3 组装 Attention 两块。",
+        "gold": [
+          "f1c993343cb31e5c-0012-ae42f935",
+          "f1c993343cb31e5c-0007-95c6318b"
+        ],
+        "gold_breadcrumbs": [
+          "第五章 动手搭建大模型 > 5.1 动手实现一个 LLaMA2 大模型 > 5.1.3 构建 LLaMA2 Attention > 5.1.3.3 组装 LLaMA2 Attention  [f1c993343cb31e5c-0012-ae42f935]",
+          "第五章 动手搭建大模型 > 5.1 动手实现一个 LLaMA2 大模型 > 5.1.3 构建 LLaMA2 Attention > 5.1.3.1 repeat_kv  [f1c993343cb31e5c-0007-95c6318b]"
+        ],
+        "top_breadcrumbs": [
+          "高频问题自测  [310019019c3383e7-0007-14d1ad25]",
+          "高频问题自测  [06cffd50eb267121-0008-12748691]",
+          "数据结构面试考什么  [fe818bc1a2c88e2b-0002-cab6954a]"
+        ],
+        "top_chunk_ids": [
+          "310019019c3383e7-0007-14d1ad25",
+          "06cffd50eb267121-0008-12748691",
+          "fe818bc1a2c88e2b-0002-cab6954a"
+        ],
+        "error": ""
+      },
+      {
+        "qid": "q031",
+        "question": "从零实现 SFT 训练时，多轮对话数据集是怎么构造的？怎么做到只对 assistant 的回答算 loss，不计算用户提问部分的 loss？",
+        "difficulty": "medium",
+        "category": "代码类",
+        "note": "代码类：答案在可运行 Python 代码块里（SFTDataset 的 loss mask 区间标记 + 按字节偏移读取）。",
+        "gold": [
+          "f1c993343cb31e5c-0052-72ab1c94",
+          "f1c993343cb31e5c-0051-9fd74063"
+        ],
+        "gold_breadcrumbs": [
+          "第五章 动手搭建大模型 > 5.3 预训练一个小型LLM > 5.3.3 Dataset > SFTDataset  [f1c993343cb31e5c-0052-72ab1c94]",
+          "第五章 动手搭建大模型 > 5.3 预训练一个小型LLM > 5.3.3 Dataset  [f1c993343cb31e5c-0051-9fd74063]"
+        ],
+        "top_breadcrumbs": [
+          "第四章 大语言模型 > 4.2 如何训练一个 LLM > 4.2.2 SFT  [ff187964a32d7c85-0020-49d78a54]",
+          "第六章 大模型训练流程实践 > 6.2 模型有监督微调 > 6.2.1 Pretrain VS SFT  [3705094ccf749302-0018-f615cfb3]",
+          "InternLM2-7B-chat Xtuner Qlora 微调 > Xtuner多轮对话介绍  [4f76b456fe449276-0013-89d4be80]"
+        ],
+        "top_chunk_ids": [
+          "ff187964a32d7c85-0020-49d78a54",
+          "3705094ccf749302-0018-f615cfb3",
+          "4f76b456fe449276-0013-89d4be80"
+        ],
+        "error": ""
+      },
+      {
+        "qid": "q032",
+        "question": "HashMap 的 putVal 源码里，什么条件下会走到 treeifyBin？为什么方法名是 treeifyBin 而不是直接转树？",
+        "difficulty": "hard",
+        "category": "代码类",
+        "note": "代码类：答案在很长的一段 Java 源码里（putVal 的 binCount 循环 + treeifyBin 注释），考长代码块的切分与嵌入质量。",
+        "gold": [
+          "2e151d3ce29beb3c-0011-252303c5",
+          "2e151d3ce29beb3c-0003-1c77e625"
+        ],
+        "gold_breadcrumbs": [
+          "HashMap 源码分析 > put 方法  [2e151d3ce29beb3c-0011-252303c5]",
+          "底层数据结构分析 > JDK1.8 之后  [2e151d3ce29beb3c-0003-1c77e625]"
+        ],
+        "top_breadcrumbs": [
+          "HashMap 源码分析 > put 方法  [2e151d3ce29beb3c-0010-5e4402a2]",
+          "高频问题  [0c0287cda9dd16f0-0005-da304adb]",
+          "[441c400d24a5d360-0000-337e49dd]"
+        ],
+        "top_chunk_ids": [
+          "2e151d3ce29beb3c-0010-5e4402a2",
+          "0c0287cda9dd16f0-0005-da304adb",
+          "441c400d24a5d360-0000-337e49dd"
+        ],
+        "error": ""
+      },
+      {
+        "qid": "q035",
+        "question": "vLLM 启动参数里的 --tensor-parallel-size 4 是什么意思？--gpu-memory-utilization 和 --max-model-len 这两个参数又各管什么？",
+        "difficulty": "easy",
+        "category": "代码类",
+        "note": "代码类：答案是 self-llm 部署文档里的启动参数说明表，三个参数名原样出现在问题里。语料里参数表重复出现在十几份部署文档里，难点是选对那张表。注意 gpu-memory-utilization / max-model-len 的详细解释只在 DeepSeek-V4 那份里，其他部署文档只给了启动命令。",
+        "gold": [
+          "5334a74e894e8138-0019-421f8bf1"
+        ],
+        "gold_breadcrumbs": [
+          "03-DeepSeek-V4-Flash vLLM 部署 > 6. 启动服务 > 6.1 关键参数说明  [5334a74e894e8138-0019-421f8bf1]"
+        ],
+        "top_breadcrumbs": [
+          "详谈 Spring 对事务的支持 > 事务属性详解  [470cad93677f4dd4-0012-31e1b060]",
+          "494.目标和 > 思路 > 动态规划 （二维dp数组） > 1. 确定dp数组以及下标的含义  [463749a98d19c734-0007-032e4dbb]",
+          "03-DeepSeek-V4-Flash vLLM 部署 > 9. 可选优化 > 9.1 启动优化配置  [5334a74e894e8138-0026-35aa2c50]"
+        ],
+        "top_chunk_ids": [
+          "470cad93677f4dd4-0012-31e1b060",
+          "463749a98d19c734-0007-032e4dbb",
+          "5334a74e894e8138-0026-35aa2c50"
+        ],
+        "error": ""
+      },
+      {
+        "qid": "q036",
+        "question": "SGLang 的 RadixAttention 和 vLLM 的 PagedAttention 解决的是不是同一件事？各自优化的是什么？",
+        "difficulty": "medium",
+        "category": "中英混杂",
+        "note": "中英混杂 + 概念辨析：两个英文术语夹在中文问句里，需要区分答案而不是只召回单词，gold 分散在 self-llm 的两份部署文档里。",
+        "gold": [
+          "9d7b1707de0e3683-0000-3054998d",
+          "2261ff9601cfcb2d-0000-7dc69e6f"
+        ],
+        "gold_breadcrumbs": [
+          "01-Qwen3.5-4B vLLM 部署调用 > vLLM 简介  [9d7b1707de0e3683-0000-3054998d]",
+          "03-Hunyuan-A13B-Instruct-SGLang部署调用 > **SGLang 简介**  [2261ff9601cfcb2d-0000-7dc69e6f]"
+        ],
+        "top_breadcrumbs": [
+          "[7d4b7eadc336cbc1-0000-65be6583]",
+          "总结  [cea00d27c416d889-0016-5320bfc1]",
+          "RAG 检索优化  [deffff6ab25413a5-0004-ddab12bb]"
+        ],
+        "top_chunk_ids": [
+          "7d4b7eadc336cbc1-0000-65be6583",
+          "cea00d27c416d889-0016-5320bfc1",
+          "deffff6ab25413a5-0004-ddab12bb"
+        ],
+        "error": ""
+      },
+      {
+        "qid": "q037",
+        "question": "显存只有 24G，想在 DeepSeek-7B-chat 上做 4bit 量化微调，from_pretrained 那几行该怎么写？bnb_4bit_compute_dtype、bnb_4bit_quant_type 分别是什么意思？",
+        "difficulty": "medium",
+        "category": "代码类",
+        "note": "代码类：答案是一段可以直接复制的 Python 调用代码，参数名是英文缩写混排（self-llm 的 QLoRA / 低精度微调两篇）。",
+        "gold": [
+          "ad515461343afe2e-0006-8b759c53",
+          "df8775a2ffba8a6c-0007-b0f0dea0"
+        ],
+        "gold_breadcrumbs": [
+          "DeepSeek-7B-chat 4bits量化 QLora 微调 > 加载tokenizer和半精度模型  [ad515461343afe2e-0006-8b759c53]",
+          "08-Qwen-7B-Chat Lora 低精度微调 > 加载tokenizer和半精度模型  [df8775a2ffba8a6c-0007-b0f0dea0]"
+        ],
+        "top_breadcrumbs": [
+          "04-Qwen-7B-Chat Lora 微调 > 概述  [e5b43a1dd0d99bdd-0000-2821dcc4]",
+          "高频问题  [0c0287cda9dd16f0-0005-da304adb]",
+          "高频问题自测  [310019019c3383e7-0007-14d1ad25]"
+        ],
+        "top_chunk_ids": [
+          "e5b43a1dd0d99bdd-0000-2821dcc4",
+          "0c0287cda9dd16f0-0005-da304adb",
+          "310019019c3383e7-0007-14d1ad25"
+        ],
+        "error": ""
+      },
+      {
+        "qid": "q038",
+        "question": "自己微调一个检索用的 embedding 模型，训练数据长什么样、batch 为什么尽量开大、temperature 又要调小？这几件事之间是什么关系？",
+        "difficulty": "hard",
+        "category": "跨节综合",
+        "note": "跨节综合：In-batch Negatives、温度参数、数据格式分处 self-llm BGE-M3 微调文档的三个小节，要拼出「batch 大小 ↔ 负样本数 ↔ 温度 ↔ 对比损失」这条链路。",
+        "gold": [
+          "9578ecab4f4fb2e9-0024-ea53db63",
+          "9578ecab4f4fb2e9-0002-5f617689",
+          "9578ecab4f4fb2e9-0006-efdf01a4"
+        ],
+        "gold_breadcrumbs": [
+          "代码检索场景微调实战，基于pytorch微调BGE-M3 embedding模型 > embedding模型的训练原理讲解 > 6. 数据处理流程 > 6.1 数据格式  [9578ecab4f4fb2e9-0024-ea53db63]",
+          "代码检索场景微调实战，基于pytorch微调BGE-M3 embedding模型 > embedding模型的训练原理讲解 > 2. 训练方法：In-batch Negatives  [9578ecab4f4fb2e9-0002-5f617689]",
+          "代码检索场景微调实战，基于pytorch微调BGE-M3 embedding模型 > embedding模型的训练原理讲解 > 3. 关键技术组件 > 3.2 温度参数（Temperature）  [9578ecab4f4fb2e9-0006-efdf01a4]"
+        ],
+        "top_breadcrumbs": [
+          "[8144167d511e11bf-0000-2bb79d52]",
+          "向量数据库与索引  [deffff6ab25413a5-0002-3c740809]",
+          "总结  [0107cc392b978d26-0028-4e8fb959]"
+        ],
+        "top_chunk_ids": [
+          "8144167d511e11bf-0000-2bb79d52",
+          "deffff6ab25413a5-0002-3c740809",
+          "0107cc392b978d26-0028-4e8fb959"
+        ],
+        "error": ""
+      },
+      {
+        "qid": "q039",
+        "question": "用 peft 配 LoRA 时 target_modules 到底要不要自己指定？给 LLaMA 类模型做指令微调时，教程里手写的五个层名是哪几个？",
+        "difficulty": "hard",
+        "category": "干扰项",
+        "note": "干扰项：happy-llm 6.3.5 也讲用 peft 实现 LoRA、也用 LoraConfig，但那条路线没写 target_modules；本题答案（手写 W_pack/down_proj/o_proj/gate_proj/up_proj）只在 self-llm 的 Baichuan2 / Atom-7B 教程里。",
+        "gold": [
+          "6a75778ab02c8a1c-0006-9d27f431",
+          "ede50bb579ea1bcb-0011-49d91f28"
+        ],
+        "gold_breadcrumbs": [
+          "Baichuan2-7B-chat lora 微调 > 定义LoraConfig：  [6a75778ab02c8a1c-0006-9d27f431]",
+          "Atom-7B-Chat 的 Lora 指令微调 > 训练  [ede50bb579ea1bcb-0011-49d91f28]"
+        ],
+        "top_breadcrumbs": [
+          "第六章 大模型训练流程实践 > 6.3 高效微调 > 6.3.4 LoRA 的代码实现 > （2）确定 LoRA 层  [3705094ccf749302-0032-a2d18fb7]",
+          "OpenELM-3B-Instruct Lora 微调 > 指令集构建  [9f13362f34347172-0003-9cf47807]",
+          "权限、成本和版本变化  [8f9d189ae0ea630e-0014-a08b5653]"
+        ],
+        "top_chunk_ids": [
+          "3705094ccf749302-0032-a2d18fb7",
+          "9f13362f34347172-0003-9cf47807",
+          "8f9d189ae0ea630e-0014-a08b5653"
+        ],
+        "error": ""
+      },
+      {
+        "qid": "q040",
+        "question": "LoRA 到底在训练哪两个矩阵？它们怎么初始化，为什么这么初始化不会把原模型带偏？可训练参数量怎么估？",
+        "difficulty": "hard",
+        "category": "干扰项",
+        "note": "干扰项：self-llm 里十几篇 LoRA 微调教程只讲 LoraConfig 怎么用、不讲原理；A/B 初始化与参数量公式只在 happy-llm 6.3.3，两个仓库都大量出现 LoRA，区分难度高。",
+        "gold": [
+          "3705094ccf749302-0028-8c9b50fd",
+          "3705094ccf749302-0029-afb3edc0"
+        ],
+        "gold_breadcrumbs": [
+          "第六章 大模型训练流程实践 > 6.3 高效微调 > 6.3.3 LoRA 微调的原理 > （1）低秩参数化更新矩阵  [3705094ccf749302-0028-8c9b50fd]",
+          "第六章 大模型训练流程实践 > 6.3 高效微调 > 6.3.3 LoRA 微调的原理 > （2）应用于 Transformer  [3705094ccf749302-0029-afb3edc0]"
+        ],
+        "top_breadcrumbs": [
+          "第五章 动手搭建大模型 > 5.3 预训练一个小型LLM > 5.3.4 预训练  [f1c993343cb31e5c-0059-c30c1b4d]",
+          "prim算法精讲 > 解题思路 > 1 初始状态  [2a468ef7ecf57e43-0003-6d1800c0]",
+          "大模型都这么厉害了，还需要微调吗？0.6B的小模型还有什么意义吗？ > Lora Config  [f5dd1a712c571f8f-0010-0dccfc2e]"
+        ],
+        "top_chunk_ids": [
+          "f1c993343cb31e5c-0059-c30c1b4d",
+          "2a468ef7ecf57e43-0003-6d1800c0",
+          "f5dd1a712c571f8f-0010-0dccfc2e"
+        ],
+        "error": ""
+      }
+    ],
+    "n_failures": 15
+  },
+  "per_query": [
+    {
+      "qid": "q001",
+      "question": "HashMap 的树化阈值为什么定成 8？为什么链表变长时不是直接转红黑树？",
+      "difficulty": "easy",
+      "category": "术语精确匹配",
+      "gold": [
+        "fb72d014bf833a14-0008-d958fd43",
+        "2e151d3ce29beb3c-0003-1c77e625"
+      ],
+      "predicted": [
+        "fb72d014bf833a14-0008-d958fd43",
+        "a45d3f544ff8e8cc-0009-e26adfc8",
+        "f1c5fa6ebe04b23c-0004-c5864d51",
+        "2e151d3ce29beb3c-0001-83563641",
+        "9e613d62bb22a3d8-0009-296acf05",
+        "fb72d014bf833a14-0009-56e170a1",
+        "fb72d014bf833a14-0000-e5d7654b",
+        "be78203bcf59d13c-0014-b146485c",
+        "fe818bc1a2c88e2b-0009-f91e810a",
+        "acc2082048a85012-0004-b6a79f26"
+      ],
+      "rank": 1,
+      "rr": 1.0,
+      "error": ""
+    },
+    {
+      "qid": "q002",
+      "question": "负载因子设成 0.75 是怎么来的？调大调小分别会怎样？",
+      "difficulty": "easy",
+      "category": "术语精确匹配",
+      "gold": [
+        "a45d3f544ff8e8cc-0007-bb17be32",
+        "a45d3f544ff8e8cc-0012-71d93dc7"
+      ],
+      "predicted": [
+        "deffff6ab25413a5-0002-3c740809",
+        "a45d3f544ff8e8cc-0007-bb17be32",
+        "a45d3f544ff8e8cc-0009-e26adfc8",
+        "e1e272dddc633ee3-0006-b8c1047b",
+        "a45d3f544ff8e8cc-0008-ea96c045",
+        "1cce262c6451f5c0-0002-f7eb1035",
+        "11b42674130aef31-0007-52f6afde",
+        "ef68575484abfe48-0004-cb48122c",
+        "0107cc392b978d26-0028-4e8fb959",
+        "fa659407d394daf0-0002-7b31e03a"
+      ],
+      "rank": 2,
+      "rr": 0.5,
+      "error": ""
+    },
+    {
+      "qid": "q003",
+      "question": "TCP 为什么要三次握手？只握两次不行吗？",
+      "difficulty": "easy",
+      "category": "术语精确匹配",
+      "gold": [
+        "dbd5b52c11b7df29-0004-1a86441f"
+      ],
+      "predicted": [
+        "fd58b9f76cb4e02b-0017-c527abc6",
+        "a12f37c43fcfcd26-0000-f2a717fa",
+        "b7402b07a55c8209-0008-b00123e7",
+        "a12f37c43fcfcd26-0008-a373f7cf",
+        "a12f37c43fcfcd26-0005-a733254d",
+        "fd58b9f76cb4e02b-0000-5c60eafe",
+        "dbd5b52c11b7df29-0004-1a86441f",
+        "11b42674130aef31-0007-52f6afde",
+        "a12f37c43fcfcd26-0002-10fa26b9",
+        "a12f37c43fcfcd26-0006-570c176b"
+      ],
+      "rank": 7,
+      "rr": 0.142857,
+      "error": ""
+    },
+    {
+      "qid": "q004",
+      "question": "缓存穿透是什么意思？一般怎么解决？",
+      "difficulty": "easy",
+      "category": "术语精确匹配",
+      "gold": [
+        "9cad32949d07d325-0007-d73f3ae0"
+      ],
+      "predicted": [
+        "9cad32949d07d325-0007-d73f3ae0",
+        "f460b0ccf8a0be45-0008-64d7e7f2",
+        "470cad93677f4dd4-0012-31e1b060",
+        "c903ae60be45c4be-0007-b7d402b5",
+        "b4c1c4a525ce988c-0029-9ea3de79",
+        "da4e256e9f2688c8-0012-93581aaa",
+        "cf9f7c59a45deeb2-0011-ffaf9f52",
+        "deffff6ab25413a5-0001-79c0ab54",
+        "0c0287cda9dd16f0-0005-da304adb",
+        "ad16b3dee43298fd-0008-ac62d47d"
+      ],
+      "rank": 1,
+      "rr": 1.0,
+      "error": ""
+    },
+    {
+      "qid": "q005",
+      "question": "一维 dp 数组写 01 背包，为什么第二层循环（背包容量）必须从大到小遍历？",
+      "difficulty": "medium",
+      "category": "术语精确匹配",
+      "gold": [
+        "803093dfcb1da26f-0004-76f9b99f",
+        "803093dfcb1da26f-0005-1a4fb096"
+      ],
+      "predicted": [
+        "84ab57a4322f4ef8-0003-a4535917",
+        "c6742d378af1dac8-0002-7330aedc",
+        "2111b2e77bb89e81-0008-766298dd",
+        "0f621cb4e3290982-0002-5260aa03",
+        "803093dfcb1da26f-0005-1a4fb096",
+        "42b366bdd02418c0-0004-7a6d1140",
+        "803093dfcb1da26f-0004-76f9b99f",
+        "463749a98d19c734-0016-3bbf8290",
+        "c547d85d4478d5c0-0007-429ed3ea",
+        "07a077d58fa47298-0011-605aca2a"
+      ],
+      "rank": 5,
+      "rr": 0.2,
+      "error": ""
+    },
+    {
+      "qid": "q006",
+      "question": "为什么扩容要重新计算哈希？扩容那次为什么是 O(n) 的代价，不是说哈希表插入是 O(1) 吗？",
+      "difficulty": "medium",
+      "category": "同义改写",
+      "gold": [
+        "a45d3f544ff8e8cc-0007-bb17be32"
+      ],
+      "predicted": [
+        "1c87c976932031b1-0031-8acc34f7",
+        "a45d3f544ff8e8cc-0014-3d59aac1",
+        "a45d3f544ff8e8cc-0005-15f9fa23",
+        "ff8f62e142512c56-0000-fd09403d",
+        "a45d3f544ff8e8cc-0000-c3e598ab",
+        "b4c1c4a525ce988c-0039-ad1d409b",
+        "06cffd50eb267121-0008-12748691",
+        "a45d3f544ff8e8cc-0009-e26adfc8",
+        "9cad32949d07d325-0011-a7be7657",
+        "a45d3f544ff8e8cc-0008-ea96c045"
+      ],
+      "rank": null,
+      "rr": 0.0,
+      "error": ""
+    },
+    {
+      "qid": "q007",
+      "question": "客户端发完最后一个 ACK 之后为什么不能马上把连接关掉，还要等一会儿？",
+      "difficulty": "medium",
+      "category": "同义改写",
+      "gold": [
+        "dbd5b52c11b7df29-0005-8629d4e2"
+      ],
+      "predicted": [
+        "e6498b883c8864b8-0001-878ed1ab",
+        "dbd5b52c11b7df29-0005-8629d4e2",
+        "134c888b30ae5ac1-0001-32fa9b9b",
+        "a12f37c43fcfcd26-0007-503c06fd",
+        "fd58b9f76cb4e02b-0017-c527abc6",
+        "a12f37c43fcfcd26-0001-0b0ff0d6",
+        "dbd5b52c11b7df29-0004-1a86441f",
+        "4352b2e07a7fc753-0008-e3bd539f",
+        "4352b2e07a7fc753-0006-448020cb",
+        "a12f37c43fcfcd26-0006-570c176b"
+      ],
+      "rank": 2,
+      "rr": 0.5,
+      "error": ""
+    },
+    {
+      "qid": "q008",
+      "question": "背包问题为什么不能每次挑价值最高的物品往里放？用贪心不行吗？",
+      "difficulty": "medium",
+      "category": "同义改写",
+      "gold": [
+        "c9e96d56b4cac8e4-0002-51eec279"
+      ],
+      "predicted": [
+        "f684442745dce3d8-0024-461bfbdb",
+        "57bcbfe1130b47db-0004-4d11c6b5",
+        "2111b2e77bb89e81-0004-db80e5f9",
+        "c9e96d56b4cac8e4-0002-51eec279",
+        "a62a2133f5670222-0001-8c18d343",
+        "89bc20ae3313d393-0002-5c6eb716",
+        "57bcbfe1130b47db-0005-f0c84c32",
+        "a62a2133f5670222-0004-c705c9d5",
+        "803093dfcb1da26f-0004-76f9b99f",
+        "57bcbfe1130b47db-0003-bcc1e085"
+      ],
+      "rank": 4,
+      "rr": 0.25,
+      "error": ""
+    },
+    {
+      "qid": "q009",
+      "question": "为什么数组长度小于 64 的时候不转红黑树，而是先扩容？",
+      "difficulty": "medium",
+      "category": "同义改写",
+      "gold": [
+        "fb72d014bf833a14-0008-d958fd43"
+      ],
+      "predicted": [
+        "fb72d014bf833a14-0008-d958fd43",
+        "fb72d014bf833a14-0010-6ab4cea4",
+        "2e151d3ce29beb3c-0001-83563641",
+        "a45d3f544ff8e8cc-0009-e26adfc8",
+        "be78203bcf59d13c-0014-b146485c",
+        "2e151d3ce29beb3c-0003-1c77e625",
+        "a76fb8f59589f90c-0005-b146b22d",
+        "9e613d62bb22a3d8-0009-296acf05",
+        "fe818bc1a2c88e2b-0009-f91e810a",
+        "fb72d014bf833a14-0018-5d22a999"
+      ],
+      "rank": 1,
+      "rr": 1.0,
+      "error": ""
+    },
+    {
+      "qid": "q010",
+      "question": "ConcurrentHashMap 在 JDK 1.8 里更新数据时锁的是什么粒度？和 1.7 的分段锁有什么区别？",
+      "difficulty": "medium",
+      "category": "同义改写",
+      "gold": [
+        "fb72d014bf833a14-0020-3b402fbe",
+        "fb72d014bf833a14-0021-e3559515",
+        "be78203bcf59d13c-0023-2426b47e"
+      ],
+      "predicted": [
+        "6360b06606f1d5e4-0007-002effe3",
+        "fb72d014bf833a14-0021-e3559515",
+        "b4121060744fbffd-0009-1f612632",
+        "c1d96f02c6006f88-0008-0655b697",
+        "db524474a255bfc9-0005-cb72a384",
+        "053890f6f30fb599-0009-26860de6",
+        "1c87c976932031b1-0037-9c2f9ea3",
+        "11b42674130aef31-0007-52f6afde",
+        "0c0287cda9dd16f0-0005-da304adb",
+        "270a55c96b4c29d0-0006-a4d208f2"
+      ],
+      "rank": 2,
+      "rr": 0.5,
+      "error": ""
+    },
+    {
+      "qid": "q011",
+      "question": "JVM 里 G1 和 CMS 收集器在回收算法和停顿控制上有什么区别？G1 为什么号称能预测停顿？",
+      "difficulty": "medium",
+      "category": "中英混杂",
+      "gold": [
+        "f27e6d496fa868a7-0026-d2e87b22",
+        "f27e6d496fa868a7-0025-3d12981f",
+        "34e1599054e875af-0026-0198f122"
+      ],
+      "predicted": [
+        "fa659407d394daf0-0004-9d653b15",
+        "fa659407d394daf0-0005-53bedf63",
+        "f27e6d496fa868a7-0000-f58bf8d1",
+        "899bb6d34525e755-0006-523f7f7e",
+        "b4121060744fbffd-0009-1f612632",
+        "f27e6d496fa868a7-0026-d2e87b22",
+        "adf2f5f7e41459a5-0026-4d4a01fb",
+        "8f0360701b137496-0004-1c5ce19a",
+        "0c53f80fde8f5170-0002-55d65f7d",
+        "6360b06606f1d5e4-0007-002effe3"
+      ],
+      "rank": 6,
+      "rr": 0.166667,
+      "error": ""
+    },
+    {
+      "qid": "q012",
+      "question": "CAS 指令有哪三个操作数？ABA 问题该怎么解决？",
+      "difficulty": "medium",
+      "category": "中英混杂",
+      "gold": [
+        "181f9393ba253cec-0058-4ee9e51f",
+        "181f9393ba253cec-0060-b0903ece"
+      ],
+      "predicted": [
+        "6455d50e9a067b30-0006-27340c29",
+        "181f9393ba253cec-0058-4ee9e51f",
+        "1716a0717d09711e-0006-9968185c",
+        "2de7cd3b8f91d254-0007-b906fc80",
+        "fe818bc1a2c88e2b-0009-f91e810a",
+        "798d12e4e7b5b298-0003-3fa52ca9",
+        "65fe244422890b87-0019-6cd8962d",
+        "87f746cc853a67c2-0004-662b5cda",
+        "2549b58d1dedf4e6-0005-53f747c3",
+        "e061a731d4f60a0a-0006-f1a8769b"
+      ],
+      "rank": 2,
+      "rr": 0.5,
+      "error": ""
+    },
+    {
+      "qid": "q013",
+      "question": "HNSW 和 IVFFLAT 这两种向量索引分别适合什么场景？内存和召回率怎么取舍？",
+      "difficulty": "medium",
+      "category": "中英混杂",
+      "gold": [
+        "0107cc392b978d26-0010-9ddb894b",
+        "0107cc392b978d26-0012-5fbfdbfd"
+      ],
+      "predicted": [
+        "deffff6ab25413a5-0002-3c740809",
+        "0107cc392b978d26-0028-4e8fb959",
+        "deffff6ab25413a5-0004-ddab12bb",
+        "1a2a90e1af92d7dd-0009-c9d6fc5e",
+        "300fab1f2db1f8fe-0013-472fe718",
+        "dbf9d9f67bdb9897-0004-126d4f21",
+        "0107cc392b978d26-0009-a92f3eea",
+        "0107cc392b978d26-0014-80cdcc53",
+        "300fab1f2db1f8fe-0012-c97350fa",
+        "fe818bc1a2c88e2b-0000-5e18c7e5"
+      ],
+      "rank": null,
+      "rr": 0.0,
+      "error": ""
+    },
+    {
+      "qid": "q014",
+      "question": "CS-Notes 里 24. 反转链表那篇，用迭代（头插法）反转单链表的 Java 代码怎么写？",
+      "difficulty": "easy",
+      "category": "代码类",
+      "gold": [
+        "0480a4b233de8b0d-0002-ab6cc415"
+      ],
+      "predicted": [
+        "2346bce70d3e0609-0021-b568f665",
+        "0480a4b233de8b0d-0002-ab6cc415",
+        "fa89c47b8d8a0421-0004-0f1584b8",
+        "2549b58d1dedf4e6-0013-5317c31a",
+        "2549b58d1dedf4e6-0003-3c28c47c",
+        "1c87c976932031b1-0027-8373d728",
+        "885c8bebafa26415-0003-1809ddfc",
+        "2346bce70d3e0609-0002-f036db19",
+        "2346bce70d3e0609-0001-d5bb2dc7",
+        "5b8160c8e7e54502-0010-d8e24449"
+      ],
+      "rank": 2,
+      "rr": 0.5,
+      "error": ""
+    },
+    {
+      "qid": "q015",
+      "question": "求数组中最小的 K 个数，用快速选择（partition）的 Java 实现是什么？",
+      "difficulty": "medium",
+      "category": "代码类",
+      "gold": [
+        "4b542d28e9bbf29c-0003-5aeb44ce"
+      ],
+      "predicted": [
+        "4b542d28e9bbf29c-0002-50a06e22",
+        "e16d56a0b3602f16-0001-4227b3b0",
+        "2e1d61fa52120e34-0015-6cb350d1",
+        "4b542d28e9bbf29c-0003-5aeb44ce",
+        "a76fb8f59589f90c-0017-016794dc",
+        "9202b4c8ae7069ee-0000-9b62b760",
+        "bfdda1dea296db63-0003-192e41eb",
+        "8d7fd8d64abc3633-0003-6ef48dd1",
+        "e16d56a0b3602f16-0000-2bb9d9d9",
+        "357da05b2cba72bd-0000-e1562692"
+      ],
+      "rank": 4,
+      "rr": 0.25,
+      "error": ""
+    },
+    {
+      "qid": "q016",
+      "question": "LeetCode 704 二分查找，左闭右闭区间那版的 C++ 代码怎么写？while 里为什么用 <= ？",
+      "difficulty": "medium",
+      "category": "代码类",
+      "gold": [
+        "c996d1ec34ca478a-0004-b5c6fb3f"
+      ],
+      "predicted": [
+        "c996d1ec34ca478a-0023-70564651",
+        "1c3266c44521935e-0003-c13ae94a",
+        "f7cbe77decfcf71f-0022-a89e6692",
+        "f7cbe77decfcf71f-0013-aa793b16",
+        "c996d1ec34ca478a-0015-3ff8f71f",
+        "c996d1ec34ca478a-0012-048faddf",
+        "c996d1ec34ca478a-0024-7d05a3ec",
+        "c996d1ec34ca478a-0020-abc57af8",
+        "c996d1ec34ca478a-0019-b1487b55",
+        "c996d1ec34ca478a-0008-72fc884d"
+      ],
+      "rank": null,
+      "rr": 0.0,
+      "error": ""
+    },
+    {
+      "qid": "q017",
+      "question": "用 BFS 广搜做「岛屿数量」为什么会超时？标记 visited 的正确时机是什么？",
+      "difficulty": "medium",
+      "category": "代码类",
+      "gold": [
+        "29a2684332d18f34-0003-16e51a83",
+        "29a2684332d18f34-0005-d9358255"
+      ],
+      "predicted": [
+        "40c24931c2ba388e-0002-8237c02d",
+        "4a526426c0160914-0002-8c80a8c8",
+        "29a2684332d18f34-0003-16e51a83",
+        "29a2684332d18f34-0002-a04eb21d",
+        "3f2138e3d6fdaf86-0002-6a4ff4cb",
+        "ab1ff052830cbc7e-0002-31b2cfb5",
+        "3d7a0c85c7410479-0008-512ad1c5",
+        "770cb3e8b524fe67-0002-9b27975b",
+        "ab1ff052830cbc7e-0004-501d538b",
+        "347ff83b731e8f7b-0013-068dc881"
+      ],
+      "rank": 3,
+      "rr": 0.333333,
+      "error": ""
+    },
+    {
+      "qid": "q018",
+      "question": "01 背包和完全背包都用一维 dp 数组时，两层 for 循环的先后顺序分别有什么讲究？",
+      "difficulty": "hard",
+      "category": "跨节综合",
+      "gold": [
+        "84ab57a4322f4ef8-0003-a4535917",
+        "84ab57a4322f4ef8-0004-5e7376fd"
+      ],
+      "predicted": [
+        "c6742d378af1dac8-0004-e935d66a",
+        "07a077d58fa47298-0008-b25870df",
+        "c6742d378af1dac8-0002-7330aedc",
+        "07a077d58fa47298-0011-605aca2a",
+        "0f621cb4e3290982-0002-5260aa03",
+        "84ab57a4322f4ef8-0004-5e7376fd",
+        "42b366bdd02418c0-0004-7a6d1140",
+        "c6742d378af1dac8-0003-f77a7b51",
+        "07a077d58fa47298-0013-304239a5",
+        "84ab57a4322f4ef8-0003-a4535917"
+      ],
+      "rank": 6,
+      "rr": 0.166667,
+      "error": ""
+    },
+    {
+      "qid": "q019",
+      "question": "HashMap 的 put 方法在什么条件下会把链表转成红黑树？转完再变大变小会退回去吗？",
+      "difficulty": "hard",
+      "category": "跨节综合",
+      "gold": [
+        "2e151d3ce29beb3c-0011-252303c5",
+        "2e151d3ce29beb3c-0015-c6e6d871",
+        "2e151d3ce29beb3c-0003-1c77e625"
+      ],
+      "predicted": [
+        "2e151d3ce29beb3c-0001-83563641",
+        "be78203bcf59d13c-0014-b146485c",
+        "2e151d3ce29beb3c-0003-1c77e625",
+        "fb72d014bf833a14-0000-e5d7654b",
+        "acc2082048a85012-0004-b6a79f26",
+        "fb72d014bf833a14-0009-56e170a1",
+        "f1c5fa6ebe04b23c-0001-3a42d8b7",
+        "fb72d014bf833a14-0008-d958fd43",
+        "a76fb8f59589f90c-0005-b146b22d",
+        "a45d3f544ff8e8cc-0009-e26adfc8"
+      ],
+      "rank": 3,
+      "rr": 0.333333,
+      "error": ""
+    },
+    {
+      "qid": "q020",
+      "question": "从一条 SQL 执行到查不出结果，索引失效的常见原因有哪些？LIKE 以 % 开头为什么用不上索引？",
+      "difficulty": "hard",
+      "category": "跨节综合",
+      "gold": [
+        "7d547b7e255a06c0-0005-07440018",
+        "7d547b7e255a06c0-0010-efc4e46c",
+        "52dd13d31f5da757-0019-e4666708"
+      ],
+      "predicted": [
+        "42da81c9acb760b6-0032-6ad639c2",
+        "d219ab740a815511-0007-bd7f8177",
+        "576dfc7806bd86ed-0005-ecbf479a",
+        "7d547b7e255a06c0-0000-7556fc7f",
+        "aa6c7e49e655d712-0008-95c82ab0",
+        "f460b0ccf8a0be45-0008-64d7e7f2",
+        "2a23a4ff010adc64-0005-e9750ebd",
+        "aa6c7e49e655d712-0002-f55e4fb7",
+        "d23ff4c145d723ea-0020-f99cf8bc",
+        "42da81c9acb760b6-0048-a3cae1c0"
+      ],
+      "rank": null,
+      "rr": 0.0,
+      "error": ""
+    },
+    {
+      "qid": "q021",
+      "question": "三数之和为什么需要排序？去重分别发生在哪几个位置？",
+      "difficulty": "hard",
+      "category": "跨节综合",
+      "gold": [
+        "347ff83b731e8f7b-0002-4fcecdf2",
+        "347ff83b731e8f7b-0013-068dc881"
+      ],
+      "predicted": [
+        "347ff83b731e8f7b-0013-068dc881",
+        "310019019c3383e7-0007-14d1ad25",
+        "270a55c96b4c29d0-0004-824dd6cd",
+        "053890f6f30fb599-0009-26860de6",
+        "b4121060744fbffd-0009-1f612632",
+        "4cafe42954d19dce-0022-317a07ba",
+        "deffff6ab25413a5-0004-ddab12bb",
+        "972c415e1d4d6727-0008-92b1ad19",
+        "7492c6db2a36513f-0015-b6e51c14",
+        "da4e256e9f2688c8-0012-93581aaa"
+      ],
+      "rank": 1,
+      "rr": 1.0,
+      "error": ""
+    },
+    {
+      "qid": "q022",
+      "question": "LeetCode 142 环形链表 II，快慢指针相遇后怎么找入环点？",
+      "difficulty": "hard",
+      "category": "干扰项",
+      "gold": [
+        "d19c67efb31a564b-0005-92ec8bf7"
+      ],
+      "predicted": [
+        "537acc233ca1ef60-0005-1ef6a386",
+        "8a0201a8f2d7e3ab-0005-fe0cfcac",
+        "d19c67efb31a564b-0005-92ec8bf7",
+        "8a0201a8f2d7e3ab-0003-9de861ef",
+        "8a0201a8f2d7e3ab-0006-93cc9923",
+        "537acc233ca1ef60-0006-8ff90fd0",
+        "8a0201a8f2d7e3ab-0002-eb04e70d",
+        "d19c67efb31a564b-0015-ae6bdedc",
+        "7ecaa576cda37a5f-0004-7fe6fe14",
+        "7ecaa576cda37a5f-0005-9393c94f"
+      ],
+      "rank": 3,
+      "rr": 0.333333,
+      "error": ""
+    },
+    {
+      "qid": "q023",
+      "question": "用递归两两交换链表中的相邻节点，怎么用虚拟头结点避免单独处理头指针？",
+      "difficulty": "hard",
+      "category": "干扰项",
+      "gold": [
+        "e179dea759304fcf-0003-db71ffd0",
+        "e179dea759304fcf-0006-b9c35ef8"
+      ],
+      "predicted": [
+        "e179dea759304fcf-0003-db71ffd0",
+        "e179dea759304fcf-0005-7033ab5e",
+        "e179dea759304fcf-0016-ce3accd8",
+        "e179dea759304fcf-0018-874c6367",
+        "bff8eac00079738e-0000-9448c647",
+        "e179dea759304fcf-0006-b9c35ef8",
+        "e179dea759304fcf-0001-218aa450",
+        "fa89c47b8d8a0421-0002-1927623a",
+        "347ff83b731e8f7b-0003-408afcca",
+        "e179dea759304fcf-0015-bf932e56"
+      ],
+      "rank": 1,
+      "rr": 1.0,
+      "error": ""
+    },
+    {
+      "qid": "q024",
+      "question": "Reverse Linked List 这道题，迭代和递归两种写法的时间、空间复杂度分别是多少？",
+      "difficulty": "hard",
+      "category": "干扰项",
+      "gold": [
+        "06cffd50eb267121-0006-92374856",
+        "2549b58d1dedf4e6-0014-637fad30"
+      ],
+      "predicted": [
+        "bda95575b0e6a0c4-0008-c6d52281",
+        "06cffd50eb267121-0008-12748691",
+        "bda95575b0e6a0c4-0001-ca1afb11",
+        "89e051c0b3722f61-0000-ca1afb11",
+        "89e051c0b3722f61-0007-a8c88029",
+        "7f9426ef831f4f0b-0004-f523aed7",
+        "89e051c0b3722f61-0002-6643cf49",
+        "bda95575b0e6a0c4-0003-6643cf49",
+        "a5fd457784a23d44-0005-dea78539",
+        "6cbec4e02dded4ba-0002-e14337dc"
+      ],
+      "rank": null,
+      "rr": 0.0,
+      "error": ""
+    },
+    {
+      "qid": "q025",
+      "question": "happy-llm 第五章里 LLaMA2 的 RMSNorm 是怎么实现的？数学公式是什么，为什么说它比 LayerNorm 省？",
+      "difficulty": "easy",
+      "category": "术语精确匹配",
+      "gold": [
+        "f1c993343cb31e5c-0004-515843e8",
+        "f1c993343cb31e5c-0005-d32f59c5"
+      ],
+      "predicted": [
+        "e1e272dddc633ee3-0006-b8c1047b",
+        "8b359883cec1f57b-0005-71f1554c",
+        "2caa98c0224470f2-0011-ab92da41",
+        "270a55c96b4c29d0-0001-0b29a9f7",
+        "fd1594c65a36775b-0003-05939a6c",
+        "a143159122c9053a-0010-3ce688ef",
+        "5aa0029682fe02cf-0008-53b615ca",
+        "fe818bc1a2c88e2b-0000-5e18c7e5",
+        "f1c993343cb31e5c-0004-515843e8",
+        "f1c993343cb31e5c-0005-d32f59c5"
+      ],
+      "rank": 9,
+      "rr": 0.111111,
+      "error": ""
+    },
+    {
+      "qid": "q026",
+      "question": "为什么用海量文本做无监督预训练之后，模型反而会在某些任务上变差？除了全量微调，能不能只训练一小部分参数就把它调回来？",
+      "difficulty": "medium",
+      "category": "同义改写",
+      "gold": [
+        "3705094ccf749302-0018-f615cfb3",
+        "3705094ccf749302-0026-11ac962a"
+      ],
+      "predicted": [
+        "3308ecd65489833e-0008-21f20905",
+        "3308ecd65489833e-0009-2c3f5856",
+        "3308ecd65489833e-0005-b6b05b79",
+        "3308ecd65489833e-0024-c89fef25",
+        "3308ecd65489833e-0021-d69ffa43",
+        "3308ecd65489833e-0027-be1388a7",
+        "3705094ccf749302-0017-37b94816",
+        "ff187964a32d7c85-0004-61b68815",
+        "3705094ccf749302-0018-f615cfb3",
+        "64c5fe15dbf65392-0005-c8438e7d"
+      ],
+      "rank": 9,
+      "rr": 0.111111,
+      "error": ""
+    },
+    {
+      "qid": "q027",
+      "question": "怎么让模型在预测时只看得到前面的词、看不到后面的词？为什么要这么设计，代码上怎么造出那个遮蔽矩阵？",
+      "difficulty": "easy",
+      "category": "同义改写",
+      "gold": [
+        "a48beb2652032df6-0006-971f3c95",
+        "a48beb2652032df6-0007-a2bf17dd"
+      ],
+      "predicted": [
+        "6d74a34d8504b6dc-0001-17d14996",
+        "756d734f905b3b40-0005-3d13cb61",
+        "3308ecd65489833e-0021-d69ffa43",
+        "a48beb2652032df6-0006-971f3c95",
+        "3308ecd65489833e-0037-70aa2ad4",
+        "52e742d3dc7d7d0d-0011-e83658a1",
+        "f0cdebb4cc007cef-0004-885b2e29",
+        "ab666c0e8252d4a0-0009-c2fd4691",
+        "0dc455e4d9f21a3e-0000-210674f0",
+        "a48beb2652032df6-0003-01e52724"
+      ],
+      "rank": 4,
+      "rr": 0.25,
+      "error": ""
+    },
+    {
+      "qid": "q028",
+      "question": "RLHF 和 DPO 有什么区别？为什么说 DPO 不需要单独训练奖励模型？KTO 又是什么定位？",
+      "difficulty": "easy",
+      "category": "中英混杂",
+      "gold": [
+        "3705094ccf749302-0040-211083a5"
+      ],
+      "predicted": [
+        "8b359883cec1f57b-0005-71f1554c",
+        "0c0287cda9dd16f0-0005-da304adb",
+        "fb09ab79a3218915-0005-11516c70",
+        "c1d96f02c6006f88-0008-0655b697",
+        "11b42674130aef31-0007-52f6afde",
+        "6360b06606f1d5e4-0007-002effe3",
+        "deffff6ab25413a5-0005-0524bfd6",
+        "db524474a255bfc9-0005-cb72a384",
+        "972c415e1d4d6727-0008-92b1ad19",
+        "e1e272dddc633ee3-0006-b8c1047b"
+      ],
+      "rank": null,
+      "rr": 0.0,
+      "error": ""
+    },
+    {
+      "qid": "q029",
+      "question": "LLaMA2 里 GQA（分组查询注意力）是怎么实现的？n_kv_heads 和 n_rep 分别是什么，K/V 为什么要 repeat 到和 Q 一样多？",
+      "difficulty": "medium",
+      "category": "中英混杂",
+      "gold": [
+        "f1c993343cb31e5c-0012-ae42f935",
+        "f1c993343cb31e5c-0007-95c6318b"
+      ],
+      "predicted": [
+        "310019019c3383e7-0007-14d1ad25",
+        "06cffd50eb267121-0008-12748691",
+        "fe818bc1a2c88e2b-0002-cab6954a",
+        "db524474a255bfc9-0005-cb72a384",
+        "270a55c96b4c29d0-0004-824dd6cd",
+        "deffff6ab25413a5-0002-3c740809",
+        "a45d3f544ff8e8cc-0014-3d59aac1",
+        "270a55c96b4c29d0-0001-0b29a9f7",
+        "fe818bc1a2c88e2b-0009-f91e810a",
+        "e1e272dddc633ee3-0006-b8c1047b"
+      ],
+      "rank": null,
+      "rr": 0.0,
+      "error": ""
+    },
+    {
+      "qid": "q030",
+      "question": "自己 LoRA 微调出来的模型想丢给 Ollama 本地跑，该走哪几步？基础模型和 LoRA 适配器分别怎么转，Modelfile 里要写哪些字段？",
+      "difficulty": "medium",
+      "category": "中英混杂",
+      "gold": [
+        "405f4c6262048338-0006-0b78b339",
+        "405f4c6262048338-0007-d5c9574d",
+        "405f4c6262048338-0008-503f00c0"
+      ],
+      "predicted": [
+        "405f4c6262048338-0008-503f00c0",
+        "405f4c6262048338-0009-c4a6d56d",
+        "405f4c6262048338-0007-d5c9574d",
+        "ab666c0e8252d4a0-0009-c2fd4691",
+        "322bd32e80854190-0006-7a85071a",
+        "626b728561c08e95-0000-62c67c95",
+        "56a7e0b894ed4a38-0030-cf90f714",
+        "c10728e37d790241-0000-62c67c95",
+        "fa95438640a697a4-0013-b64eb23d",
+        "564c2cab1f357929-0005-9e082193"
+      ],
+      "rank": 1,
+      "rr": 1.0,
+      "error": ""
+    },
+    {
+      "qid": "q031",
+      "question": "从零实现 SFT 训练时，多轮对话数据集是怎么构造的？怎么做到只对 assistant 的回答算 loss，不计算用户提问部分的 loss？",
+      "difficulty": "medium",
+      "category": "代码类",
+      "gold": [
+        "f1c993343cb31e5c-0052-72ab1c94",
+        "f1c993343cb31e5c-0051-9fd74063"
+      ],
+      "predicted": [
+        "ff187964a32d7c85-0020-49d78a54",
+        "3705094ccf749302-0018-f615cfb3",
+        "4f76b456fe449276-0013-89d4be80",
+        "4f76b456fe449276-0012-f0157d4f",
+        "309ad75417ea64f3-0005-7736e13f",
+        "70fedd3ca0593f86-0013-56190fe3",
+        "3c7d2c17f147b80a-0004-58e8625b",
+        "f1c993343cb31e5c-0053-ad075561",
+        "6874329ad8d84e14-0023-365c56fc",
+        "6d27ce2103f65ed2-0008-ead27c30"
+      ],
+      "rank": null,
+      "rr": 0.0,
+      "error": ""
+    },
+    {
+      "qid": "q032",
+      "question": "HashMap 的 putVal 源码里，什么条件下会走到 treeifyBin？为什么方法名是 treeifyBin 而不是直接转树？",
+      "difficulty": "hard",
+      "category": "代码类",
+      "gold": [
+        "2e151d3ce29beb3c-0011-252303c5",
+        "2e151d3ce29beb3c-0003-1c77e625"
+      ],
+      "predicted": [
+        "2e151d3ce29beb3c-0010-5e4402a2",
+        "0c0287cda9dd16f0-0005-da304adb",
+        "441c400d24a5d360-0000-337e49dd",
+        "ef4df1ef45fe617a-0006-a700e0af",
+        "1d8576ec7fa31b3d-0009-27632cdb",
+        "a45d3f544ff8e8cc-0014-3d59aac1",
+        "310019019c3383e7-0007-14d1ad25",
+        "fb72d014bf833a14-0008-d958fd43",
+        "fb72d014bf833a14-0009-56e170a1",
+        "9e613d62bb22a3d8-0009-296acf05"
+      ],
+      "rank": null,
+      "rr": 0.0,
+      "error": ""
+    },
+    {
+      "qid": "q033",
+      "question": "Transformer 的 Decoder 层里第一个注意力层和 Encoder 里的自注意力差在哪？它怎么保证每个 token 只能看到自己之前的注意力分数，代码上靠什么参数控制？",
+      "difficulty": "hard",
+      "category": "跨节综合",
+      "gold": [
+        "a48beb2652032df6-0019-17dd7ca4",
+        "a48beb2652032df6-0020-2aaf2e6f"
+      ],
+      "predicted": [
+        "a48beb2652032df6-0019-17dd7ca4",
+        "3308ecd65489833e-0026-42ae1782",
+        "a48beb2652032df6-0008-e9ace4c8",
+        "3308ecd65489833e-0004-0c64f887",
+        "a48beb2652032df6-0017-07d95ae3",
+        "b36f802704bd2443-0018-7273e2bc",
+        "a48beb2652032df6-0003-01e52724",
+        "3308ecd65489833e-0025-6e5466c1",
+        "b36f802704bd2443-0012-1b04f4f0",
+        "7cffddb19a1885fa-0012-341a4095"
+      ],
+      "rank": 1,
+      "rr": 1.0,
+      "error": ""
+    },
+    {
+      "qid": "q034",
+      "question": "从零实现 LLaMA2 的 Attention 时，手动算注意力和用 Flash Attention 两条分支是怎么切换的？不支持 Flash Attention 时遮住未来 token 的 mask 怎么造？",
+      "difficulty": "hard",
+      "category": "跨节综合",
+      "gold": [
+        "f1c993343cb31e5c-0013-31002165",
+        "f1c993343cb31e5c-0012-ae42f935"
+      ],
+      "predicted": [
+        "dac2cdc2b60e176a-0006-0c1bbad8",
+        "b36f802704bd2443-0019-d361656e",
+        "2ae10b63772a3265-0022-8c1ee438",
+        "a48beb2652032df6-0004-ce65076f",
+        "f1c993343cb31e5c-0012-ae42f935",
+        "9d8a9afeb9a5037d-0019-ee3d9101",
+        "f1c993343cb31e5c-0013-31002165",
+        "b36f802704bd2443-0021-81d528d2",
+        "a48beb2652032df6-0006-971f3c95",
+        "a48beb2652032df6-0007-a2bf17dd"
+      ],
+      "rank": 5,
+      "rr": 0.2,
+      "error": ""
+    },
+    {
+      "qid": "q035",
+      "question": "vLLM 启动参数里的 --tensor-parallel-size 4 是什么意思？--gpu-memory-utilization 和 --max-model-len 这两个参数又各管什么？",
+      "difficulty": "easy",
+      "category": "代码类",
+      "gold": [
+        "5334a74e894e8138-0019-421f8bf1"
+      ],
+      "predicted": [
+        "470cad93677f4dd4-0012-31e1b060",
+        "463749a98d19c734-0007-032e4dbb",
+        "5334a74e894e8138-0026-35aa2c50",
+        "6360b06606f1d5e4-0007-002effe3",
+        "ad95a1bdeaeb7256-0006-458f8c4e",
+        "5334a74e894e8138-0017-5eacf7bb",
+        "7d4cac5b25d34a86-0001-3022e881",
+        "b30e3b1dcbaf99a3-0004-1788dc0f",
+        "95a58a55675dd3a0-0003-08d55825",
+        "9d7b1707de0e3683-0005-ab90e66c"
+      ],
+      "rank": null,
+      "rr": 0.0,
+      "error": ""
+    },
+    {
+      "qid": "q036",
+      "question": "SGLang 的 RadixAttention 和 vLLM 的 PagedAttention 解决的是不是同一件事？各自优化的是什么？",
+      "difficulty": "medium",
+      "category": "中英混杂",
+      "gold": [
+        "9d7b1707de0e3683-0000-3054998d",
+        "2261ff9601cfcb2d-0000-7dc69e6f"
+      ],
+      "predicted": [
+        "7d4b7eadc336cbc1-0000-65be6583",
+        "cea00d27c416d889-0016-5320bfc1",
+        "deffff6ab25413a5-0004-ddab12bb",
+        "d173ac2339265f81-0005-fd245538",
+        "2a23a4ff010adc64-0005-e9750ebd",
+        "a64284a388779b9a-0007-49198a48",
+        "459b56b70c59aac8-0000-6c620c6c",
+        "3d7a0c85c7410479-0005-78d8f58f",
+        "6455d50e9a067b30-0006-27340c29",
+        "9b19284d032d8ed5-0005-78d8f58f"
+      ],
+      "rank": null,
+      "rr": 0.0,
+      "error": ""
+    },
+    {
+      "qid": "q037",
+      "question": "显存只有 24G，想在 DeepSeek-7B-chat 上做 4bit 量化微调，from_pretrained 那几行该怎么写？bnb_4bit_compute_dtype、bnb_4bit_quant_type 分别是什么意思？",
+      "difficulty": "medium",
+      "category": "代码类",
+      "gold": [
+        "ad515461343afe2e-0006-8b759c53",
+        "df8775a2ffba8a6c-0007-b0f0dea0"
+      ],
+      "predicted": [
+        "e5b43a1dd0d99bdd-0000-2821dcc4",
+        "0c0287cda9dd16f0-0005-da304adb",
+        "310019019c3383e7-0007-14d1ad25",
+        "deffff6ab25413a5-0004-ddab12bb",
+        "deffff6ab25413a5-0002-3c740809",
+        "cea00d27c416d889-0016-5320bfc1",
+        "ede50bb579ea1bcb-0000-10f277b8",
+        "ef4df1ef45fe617a-0006-a700e0af",
+        "6455d50e9a067b30-0006-27340c29",
+        "771355247d7d27c4-0010-cf862730"
+      ],
+      "rank": null,
+      "rr": 0.0,
+      "error": ""
+    },
+    {
+      "qid": "q038",
+      "question": "自己微调一个检索用的 embedding 模型，训练数据长什么样、batch 为什么尽量开大、temperature 又要调小？这几件事之间是什么关系？",
+      "difficulty": "hard",
+      "category": "跨节综合",
+      "gold": [
+        "9578ecab4f4fb2e9-0024-ea53db63",
+        "9578ecab4f4fb2e9-0002-5f617689",
+        "9578ecab4f4fb2e9-0006-efdf01a4"
+      ],
+      "predicted": [
+        "8144167d511e11bf-0000-2bb79d52",
+        "deffff6ab25413a5-0002-3c740809",
+        "0107cc392b978d26-0028-4e8fb959",
+        "cea00d27c416d889-0016-5320bfc1",
+        "ff7fb026dfe20b52-0000-4792618d",
+        "3fe2be4aac4b137d-0000-f26d2655",
+        "7887a3c9919195e0-0006-35e5dfe9",
+        "3308ecd65489833e-0007-c064f1f1",
+        "0107cc392b978d26-0001-c9bf23fc",
+        "8144167d511e11bf-0002-7c385eb5"
+      ],
+      "rank": null,
+      "rr": 0.0,
+      "error": ""
+    },
+    {
+      "qid": "q039",
+      "question": "用 peft 配 LoRA 时 target_modules 到底要不要自己指定？给 LLaMA 类模型做指令微调时，教程里手写的五个层名是哪几个？",
+      "difficulty": "hard",
+      "category": "干扰项",
+      "gold": [
+        "6a75778ab02c8a1c-0006-9d27f431",
+        "ede50bb579ea1bcb-0011-49d91f28"
+      ],
+      "predicted": [
+        "3705094ccf749302-0032-a2d18fb7",
+        "9f13362f34347172-0003-9cf47807",
+        "8f9d189ae0ea630e-0014-a08b5653",
+        "49c385bcc472e48f-0003-d56b5a04",
+        "763116a60a08ba1f-0003-998684a0",
+        "6a75778ab02c8a1c-0003-118aca28",
+        "be48d95965fa0103-0003-d56b5a04",
+        "42f48d51d262ca0d-0002-d56b5a04",
+        "f752ebf6a5c8c492-0004-998684a0",
+        "c00df83bd981b8c5-0003-998684a0"
+      ],
+      "rank": null,
+      "rr": 0.0,
+      "error": ""
+    },
+    {
+      "qid": "q040",
+      "question": "LoRA 到底在训练哪两个矩阵？它们怎么初始化，为什么这么初始化不会把原模型带偏？可训练参数量怎么估？",
+      "difficulty": "hard",
+      "category": "干扰项",
+      "gold": [
+        "3705094ccf749302-0028-8c9b50fd",
+        "3705094ccf749302-0029-afb3edc0"
+      ],
+      "predicted": [
+        "f1c993343cb31e5c-0059-c30c1b4d",
+        "2a468ef7ecf57e43-0003-6d1800c0",
+        "f5dd1a712c571f8f-0010-0dccfc2e",
+        "f5624d5f00c328f7-0010-0dccfc2e",
+        "3705094ccf749302-0013-e305e405",
+        "56a7e0b894ed4a38-0008-989d99d0",
+        "a1a6df3a2d76b5e9-0007-989d99d0",
+        "1825b40a0b1ba370-0015-dc77e975",
+        "f1c993343cb31e5c-0067-449558b7",
+        "d6b5528de6dfb835-0008-4460b419"
+      ],
+      "rank": null,
+      "rr": 0.0,
+      "error": ""
+    }
+  ]
+}

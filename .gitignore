@@ -1,0 +1,35 @@
+# ---- 语料：仅本地使用，绝不随仓库分发 ----
+data/raw/
+data/processed/
+
+# ---- 模型与索引：体积大，可重建 ----
+# 模型 2.18 GB，索引约 80 MB。都不进版本库，用 docs/phase2-notes.md 里的步骤重建。
+models/
+data/index/
+
+# ---- 手动解压的依赖 ----
+# 本机 pip 装不上（解包阶段被沙箱拒绝），依赖靠下 wheel 手动解压。
+# .pylibs       : tokenizers（ONNX 分词器）
+# .pylibs-dml   : onnxruntime-directml（用上显卡，比 CPU 快 9.5 倍）
+.pylibs/
+.pylibs-dml/
+.piptmp/
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# ---- 临时目录 ----
+# 系统 %TEMP% 在本机不可写（pytest 的 tmp_path 同样失效），
+# 所以测试和脚本统一用项目内的这几个目录。
+.tmp/
+.scratch/
+tests/.tmp/
+
+# ---- 其他 ----
+*.log
+.DS_Store
