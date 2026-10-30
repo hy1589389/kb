@@ -144,6 +144,81 @@ class RetrievalConfig:
 
 
 @dataclass
+class GenerateConfig:
+    """Phase 4 生成参数。对应 config.toml 的 `[generate]` 段。
+
+    `api_key_env` 存的是**环境变量名**，不是 key 本身 —— 密钥只从环境变量 /
+    .env / 注册表读，配置文件里永远不出现 key。
+
+    `min_top_score` 填 0（或留空）表示关闭。注意它只在单路检索下有意义：
+    混合检索的 score 是 RRF 融合分（约 0.016~0.033），和余弦相似度不在一个
+    量纲上，拿绝对值当阈值会把所有查询都拒掉。`Answerer` 在 source 为
+    hybrid / rerank 时会显式跳过这个阈值并打日志。
+    """
+
+    model: str = "deepseek-chat"
+    base_url: str = "https://api.deepseek.com/chat/completions"
+    api_key_env: str = "DEEPSEEK_API_KEY"
+    temperature: float = 0.1
+    max_tokens: int = 1024
+    max_context_chars: int = 6000
+    max_chunk_chars: int = 1500
+    top_k: int = 5
+    min_top_score: float = 0.0
+    timeout: float = 60.0
+
+    @classmethod
+    def load(cls, config_path: Path | None = None) -> "GenerateConfig":
+        cfg = cls()
+        if config_path is None or not Path(config_path).exists():
+            return cfg
+        data = tomllib.loads(Path(config_path).read_text(encoding="utf-8"))
+        cfg.apply_section(data.get("generate", {}))
+        return cfg
+
+    def apply_section(self, section: dict) -> "GenerateConfig":
+        """把 TOML 的 [generate] 段套到默认值上。
+
+        类型推断方式与 `RetrievalConfig.apply_section` 相同（按当前字段值的
+        类型），额外补了 float：`temperature` 默认 0.1 是 float，而 TOML 里
+        写 `0` 会解析成 int，不转的话下游拿到的类型会飘。
+        """
+        for f in fields(self):
+            if f.name not in section:
+                continue
+            default = self.__dict__[f.name]
+            raw = section[f.name]
+            if isinstance(default, bool):
+                value: object = bool(raw)
+            elif isinstance(default, Path):
+                text = str(raw).strip()
+                value = None if not text else Path(text)
+            elif isinstance(default, int):
+                value = int(raw)
+            elif isinstance(default, float):
+                value = float(raw)
+            else:
+                value = raw
+            self.__dict__[f.name] = value
+        return self
+
+    def to_answerer_cfg(self) -> dict:
+        """转成 `Answerer(cfg=...)` 认的 dict。
+
+        不含 model / base_url / api_key_env：那三个是 `DeepSeekClient`
+        的构造参数，Answerer 用不到。
+        """
+        return {
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "max_context_chars": self.max_context_chars,
+            "max_chunk_chars": self.max_chunk_chars,
+            "top_k": self.top_k,
+            "min_top_score": self.min_top_score,
+        }
+
+
+@dataclass
 class IngestConfig:
     raw_dir: Path = Path("data/raw")
     out_dir: Path = Path("data/processed")
@@ -153,6 +228,9 @@ class IngestConfig:
     # Phase 2 的检索配置挂在这里，方便一个入口拿到全部配置。
     # 默认值来自 RetrievalConfig()，load() 会用 TOML 的 [retrieval] 段覆盖。
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
+    # Phase 4 的生成配置，同理。新增这两个字段不影响 Phase 1 的行为：
+    # 它们只在 load() 里被 TOML 覆盖，Phase 1 代码根本不读。
+    generate: GenerateConfig = field(default_factory=GenerateConfig)
 
     @classmethod
     def load(cls, config_path: Path | None = None) -> "IngestConfig":
@@ -180,6 +258,8 @@ class IngestConfig:
 
         # Phase 2：同一份 TOML 里的 [retrieval] 段
         cfg.retrieval.apply_section(data.get("retrieval", {}))
+        # Phase 4：同一份 TOML 里的 [generate] 段
+        cfg.generate.apply_section(data.get("generate", {}))
         return cfg
 
     def resolve(self, project_root: Path) -> "IngestConfig":

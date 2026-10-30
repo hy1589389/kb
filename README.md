@@ -3,7 +3,7 @@
 本地知识库。把散落各处的 Markdown 文档收进来，切成带标题路径和原文行号的块，
 再用「BM25 + 稠密向量」的混合检索找出来，答案带引用来源。
 
-目前完成到检索和评测，生成部分还没写。
+目前完成到生成：检索 → 大模型 → 带引用的答案。拒答和引用校验在后置步骤里做。
 
 ## 目录结构
 
@@ -30,7 +30,13 @@ kb/
 │   │   ├── hybrid.py        # RRF 融合
 │   │   ├── embedder.py      # ONNX 嵌入 / 重排
 │   │   └── pipeline.py
-│   └── eval/                # 评测指标与运行器
+│   ├── eval/                # 第三层：评测指标与运行器
+│   └── generate/            # 第四层：生成与引用校验
+│       ├── prompt.py        # 提示词与上下文截断
+│       ├── llm.py           # DeepSeek 客户端 + 密钥读取
+│       ├── cite.py          # [n] 校验与切句
+│       ├── pipeline.py      # Answerer / 两层拒答
+│       └── types.py         # Citation / Answer
 ├── eval/
 │   ├── questions.jsonl      # 评测集
 │   └── run_eval.py
@@ -96,7 +102,36 @@ python ingest.py search "TCP 为什么三次握手" --no-dense --top-k 5
 python ingest.py search "LoRA 微调怎么配" --json
 ```
 
-### 5. 评测
+### 5. 问答（检索 + 生成）
+
+```powershell
+python ingest.py ask "HashMap 什么时候把链表转成红黑树"
+python ingest.py ask "HashMap 什么时候把链表转成红黑树" --top-k 3 --json
+python ingest.py ask "LoRA 微调怎么配" --no-rerank --show-hits
+```
+
+先打答案，再打引用列表：
+
+```
+当链表长度大于阈值（默认为 8）时，会执行链表转红黑树的逻辑 [1][2][3]。
+
+引用（5 条）：
+[1] JavaGuide/docs/java/collection/java-collection-questions-02.md:222-297  Map（重要） > HashMap 的底层实现
+...
+```
+
+模型需要 API key，按这个顺序找，找到即止：
+
+1. 环境变量 `DEEPSEEK_API_KEY`
+2. 项目根 `.env`（`DEEPSEEK_API_KEY=...`，支持 `#` 注释和引号，文件不入库）
+3. Windows 注册表里的系统 / 用户环境变量
+
+都没有就报错退出，不会自己建 `.env`。key 不写进源码、日志、报错和 `--json` 输出。
+
+资料不足时拒答，正文是「知识库中没有找到足够的信息来回答这个问题。」，
+`refused=true`，`refuse_reason` 写明是「检索无结果」还是「资料不足」。
+
+### 6. 评测
 
 ```powershell
 python eval\run_eval.py --index-dir data\index --top-k 10
@@ -104,12 +139,13 @@ python eval\run_eval.py --no-dense            # 只跑 BM25，用于对照
 python eval\run_eval.py --compare results\a.json results\b.json
 ```
 
-### 6. 测试
+### 7. 测试
 
 ```powershell
 python tests\test_chunker.py      # 切块器
 python tests\test_retrieve.py     # 检索层
 python tests\test_eval.py         # 评测逻辑
+python tests\test_generate.py     # 生成层（不联网）
 python -m unittest discover -s tests
 ```
 
@@ -138,6 +174,23 @@ python -m unittest discover -s tests
 | `final_top_k` | 10 | 最终返回条数 |
 | `rrf_k` | 60 | RRF 的平滑常数 |
 | `embed_max_length` | 512 | 截断长度 |
+
+生成参数：
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `model` / `base_url` | `deepseek-chat` | 模型与接口地址 |
+| `api_key_env` | `DEEPSEEK_API_KEY` | 环境变量名，不是 key |
+| `temperature` / `max_tokens` | 0.1 / 1024 | 采样参数 |
+| `max_context_chars` | 6000 | 送进提示词的正文总字数上限，超了按排名丢后面的块 |
+| `max_chunk_chars` | 1500 | 单块正文截断长度 |
+| `top_k` | 5 | 送进提示词的块数 |
+| `min_top_score` | 0（关闭） | 只在单路检索下有意义，混合检索是 RRF 分，见下 |
+| `timeout` | 60 | 单次请求超时（秒） |
+
+`min_top_score` 不能拿去卡混合检索：RRF 融合分只有名次含义（约 0.016~0.033），
+和余弦相似度不在一个量纲上。代码在 `source=hybrid` / `rerank` 时显式跳过它并打日志，
+否则会把所有查询都拒掉。
 
 命令行参数覆盖配置：
 
@@ -201,12 +254,37 @@ R@10 从 90% 提到 95%，MRR 从 0.648 到 0.667。
 低于 85.7%。原因是 RRF 等权融合，BM25 在代码查询上召回的错误块把正确块挤了下去。
 下一步该试加权 RRF，或者给 BM25 一路加分数阈值。
 
+### 重排：接了，但效果反而降了
+
+加了 `bge-reranker-base`（XLM-R，1077 MB，跑在 DirectML 上）之后：
+
+| 配置 | R@1 | R@3 | R@5 | R@10 | MRR@10 |
+| --- | --- | --- | --- | --- | --- |
+| 混合 | 52.5% | 80.0% | 85.0% | 95.0% | 0.667 |
+| 混合 + 重排 | 40.0% | 75.0% | 80.0% | 87.5% | 0.580 |
+
+**所以默认不开重排**（`--rerank` 是可选参数）。原因查了两条：
+
+1. **评测集的 gold 标窄了。** 5 个失败里 2 个其实答对了，只是答案落在另一篇文档。
+   最典型的是问 vLLM 的三个参数，`self-llm` 里至少两份部署文档都解释了，但 gold 只标了
+   DeepSeek 那篇；重排把 Hunyuan 那篇排上来就判失败。这是 chunk 级精确匹配的固有偏差，
+   不是重排的错。
+2. **扣掉假失败后仍有 3 个真失败**，R@1 也明显下降。重排模型对这类中文技术文本的区分力
+   不够，而且 `max_length=512` 对平均 370 token、最长 1200+ token 的块会截断。
+
+排查过程中排除了两个怀疑：分词器的 pair 模板是对的（XLM-R 的 `<s> A </s></s> B </s>`），
+`<pad>` 虽然应该是 1 而代码填了 0，但 `attention_mask` 已经屏蔽，改成 1 分数完全一样。
+
+**结论**：要提升的话，换 `bge-reranker-v2-m3`（多语言专用）比调参更有希望；
+或者先把评测改成端到端判断答案正确性，消掉 gold 标窄带来的假失败。
+
 复现：
 
 ```powershell
 python eval\run_eval.py --index-dir data\index --out results\run_hybrid.json
 python eval\run_eval.py --index-dir data\index --no-dense --out results\run_sparse_only.json
 python eval\run_eval.py --index-dir data\index --no-sparse --out results\run_dense_only.json
+python eval\run_eval.py --index-dir data\index --rerank --out results\run_hybrid_rerank.json
 python eval\run_eval.py --compare results\run_sparse_only.json results\run_hybrid.json
 ```
 
@@ -264,7 +342,8 @@ BM25 索引：212,481 个词，4,053,133 条 posting，平均块长 370 token。
 ## 已知问题
 
 - 只处理 Markdown，PDF 和网页还没做。
-- 生成和引用溯源还没写，目前只到检索。
+- 生成只用一路 DeepSeek，没有本地模型兜底；接口超时或限流时整轮失败，没有重试。
+- 引用校验只检查编号是否存在、句子有没有标引用，不检查引用内容是否真的支持该论断。
 - `scripts/*.ps1` 必须保持纯 ASCII。Windows PowerShell 5.1 对无 BOM 的 `.ps1` 按系统 ANSI
   代码页解码，中文注释会把换行吞掉，脚本直接解析失败。
 - 本机 pip 装不上包（解包阶段被沙箱拒绝），依赖靠下 wheel 手动解压，
@@ -276,8 +355,11 @@ BM25 索引：212,481 个词，4,053,133 条 posting，平均块长 370 token。
 - [x] 语料入库
 - [x] 混合检索：BM25 + bge-m3 稠密向量 + RRF 融合
 - [x] 评测集与 Recall@k / MRR
-- [ ] 重排（bge-reranker，代码已写，权重未下）
-- [ ] 生成与引用溯源
+- [x] 重排验证（`bge-reranker-base` 实测效果反而低 5 个点，默认关闭，原因见「检索效果」）
+- [x] 生成与引用溯源（`ask`，DeepSeek + 两层拒答 + `[n]` 编号校验 + 同位置引用归并）
+- [ ] 端到端评测：让模型判断答案正确性，消掉 gold 标窄导致的假失败
+- [ ] 换 `bge-reranker-v2-m3` 再试重排
+- [ ] 引用内容级校验（现在只查编号范围，不查论断是否被引用块支持）
 - [ ] 增量索引
 - [ ] PDF、网页、代码仓库解析
 - [ ] 封装成 MCP Server

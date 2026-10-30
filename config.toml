@@ -55,3 +55,32 @@ fusion_top_k = 50        # RRF 融合后进入重排的候选数（交叉编码�
 final_top_k = 10         # 默认返回条数，可被 search --top-k 覆盖
 rrf_k = 60               # RRF 平滑常数，论文推荐 60
 use_reranker = false     # 默认不重排：CPU 上重排 50 条要 2~5 秒
+
+# ============================================================
+#  Phase 4 · 生成（检索 -> 大模型 -> 带引用的答案）
+#  问  答：python ingest.py ask "HashMap 什么时候转红黑树"
+#  密钥：环境变量 / 项目根 .env / Windows 注册表，三选一即可，
+#        配置文件里只写变量名，永远不写 key 本身。
+# ============================================================
+
+[generate]
+model = "deepseek-chat"
+base_url = "https://api.deepseek.com/chat/completions"
+api_key_env = "DEEPSEEK_API_KEY"   # 只放变量名，不放 key
+
+temperature = 0.1
+max_tokens = 1024
+
+# 上下文预算：单块先截到 1500 字，所有块加起来不超过 6000 字，
+# 超了就按排名丢掉后面的块（提示词里会说明截断到前 N 条）
+max_context_chars = 6000
+max_chunk_chars = 1500
+
+top_k = 5              # 送进提示词的块数上限，可被 ask --top-k 覆盖
+
+# 0 = 关闭。只在单路检索（--no-dense 或 --no-sparse）下有意义：
+# 混合检索的 score 是 RRF 融合分（约 0.016~0.033），和余弦相似度不在一个
+# 量纲上，用它当绝对阈值会把所有查询都拒掉。代码在 source=hybrid 时显式跳过。
+min_top_score = 0
+
+timeout = 60           # 单次请求超时（秒）

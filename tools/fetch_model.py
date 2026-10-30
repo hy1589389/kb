@@ -119,6 +119,13 @@ def main() -> int:
         wanted = [f for f in onnx if f.endswith((".onnx", ".onnx_data", ".json"))]
         print("没有 fp16，使用 fp32 版本")
 
+    # 有些仓库（bge-reranker-base 就是这样）把 tokenizer 放在仓库根目录而不是 onnx/ 下。
+    # 只按 onnx/ 前缀过滤会漏掉它们，结果是模型下全了却加载不了分词器。这里补齐。
+    for extra in ("tokenizer.json", "tokenizer_config.json",
+                  "special_tokens_map.json", "config.json"):
+        if extra in files and extra not in wanted:
+            wanted.append(extra)
+
     print()
     ok_all = True
     for remote in wanted:
