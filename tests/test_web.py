@@ -200,6 +200,59 @@ class ResolveSourcePathTests(TempCorpus):
         hit = make_hit(rel_path="docs/../docs/hashmap.md")
         self.assertEqual(resolve_source_path(hit, self.raw), self.src.resolve())
 
+    # ---- 多集合之后新增的三种布局 ------------------------------------
+
+    def test_resolves_markdown_inside_collection(self) -> None:
+        """Markdown 集合：<raw>/<collection>/<repo>/<rel_path>。"""
+        target = self.raw / "tech" / "JavaGuide" / "docs" / "hashmap.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("# HashMap\n", encoding="utf-8")
+        chunk = {"repo": "JavaGuide", "rel_path": "docs/hashmap.md",
+                 "collection": "tech", "line_start": 1, "line_end": 2}
+        self.assertEqual(resolve_source_path(chunk, self.raw), target.resolve())
+
+    def test_resolves_flat_pdf_inside_collection(self) -> None:
+        """PDF 集合是平铺的：<raw>/<collection>/<rel_path>，repo 只是文件名。
+
+        PDF 目录里没有 `<repo>` 这个子目录，所以不能套 `<repo>/<rel_path>`。
+        """
+        target = self.raw / "profile" / "何毓-简历.pdf"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"%PDF-1.4\n")
+        chunk = {"repo": "何毓-简历", "rel_path": "何毓-简历.pdf",
+                 "collection": "profile", "locator": "P1",
+                 "line_start": 1, "line_end": 1}
+        self.assertEqual(resolve_source_path(chunk, self.raw), target.resolve())
+
+    def test_falls_back_to_legacy_layout_without_collection(self) -> None:
+        """没有 collection 字段（旧索引）时仍按 <raw>/<repo>/<rel_path> 解析。"""
+        chunk = {"repo": "JavaGuide", "rel_path": "docs/hashmap.md"}
+        self.assertEqual(resolve_source_path(chunk, self.raw), self.src.resolve())
+
+    def test_collection_never_escapes_raw_dir(self) -> None:
+        """collection 里塞 `..` 也不能打开 raw_dir 之外的文件。"""
+        chunk = {"repo": "JavaGuide", "rel_path": "docs/hashmap.md",
+                 "collection": "..", "line_start": 1, "line_end": 2}
+        path = resolve_source_path(chunk, self.raw)
+        if path is not None:
+            self.assertTrue(path.is_relative_to(self.raw.resolve()))
+
+    def test_legacy_meta_without_collection_finds_nested_corpus(self) -> None:
+        """旧索引的 meta 没有 collection 字段，但语料已经挪进 <raw>/tech/。
+
+        Web 的 /api/open 直接查原始 meta 字典，拿不到 collection，所以解析
+        函数必须在缺字段时自己扫一级子目录，否则打开源码会失效。
+
+        这里用 CS-Notes 而不是 TempCorpus 默认的 JavaGuide：raw/JavaGuide
+        在夹具里本来就存在，两个候选都能命中会让用例测不出「扫子目录」这件事。
+        """
+        target = self.raw / "tech" / "CS-Notes" / "README.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("# CS-Notes\n", encoding="utf-8")
+        legacy = {"repo": "CS-Notes", "rel_path": "README.md",
+                  "line_start": 1, "line_end": 2}   # 故意没有 collection
+        self.assertEqual(resolve_source_path(legacy, self.raw), target.resolve())
+
 
 class DetectEditorTests(unittest.TestCase):
     def test_prefers_code(self) -> None:

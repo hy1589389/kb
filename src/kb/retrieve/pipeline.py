@@ -38,12 +38,27 @@ embed_text（breadcrumb + 正文）只用于建索引时的嵌入，检索阶段
 重排只对融合后的 `fusion_top_k`（默认 50）条生效，因为交叉编码器需要对
 每个 (query, passage) 对做一次完整前向，成本与候选数线性相关，而对全部
 18k 块做交叉编码在 CPU 上是几十分钟，不现实。
+
+## 多集合（多索引）
+
+`Retriever` 的 `index_dir` 参数接受两种形态：
+
+    Retriever(Path("data/index"))                      # 单索引，向后兼容
+    Retriever({"tech": Path("data/index"),
+               "profile": Path("data/index/profile")})  # 多集合
+
+索引目录是**物理隔离**的：技术文档 18k 块在 `data/index/`，简历几十块在
+`data/index/profile/`，各自独立建、独立删。查询时每个集合内部先做
+dense+sparse 的 RRF 融合，再用 `rrf_fuse` 跨集合合并一次，权重来自
+`cfg["collections"]`（`{集合名: 权重}`，默认 1.0）。所有索引在 `__init__` 里
+加载一次，请求期不再读盘。
 """
 
 from __future__ import annotations
 
 import json
 import time
+from collections.abc import Mapping
 from pathlib import Path
 
 import numpy as np
@@ -71,6 +86,10 @@ DEFAULT_CFG: dict = {
     "rerank_batch_size": 8,
     "embed_batch_size": 16,
     "embed_max_length": 512,
+    # 单索引模式下给结果打的集合名（多集合模式用 dict 的 key，不看这个）
+    "collection": "",
+    # 多集合模式下每个集合的权重：{"tech": 1.0, "profile": 0.8}
+    "collections": {},
 }
 
 _META_NAME = "chunks_meta.jsonl"
@@ -79,10 +98,21 @@ _INDEX_META = "index_meta.json"
 # 元数据里保留的字段。`embed_text` 不进索引元数据（它只用于建索引时的
 # 嵌入，检索时用不到），但 `text` 要留 —— 重排需要正文，展示也需要正文，
 # 不存的话每次查询都得回读 44 MB 的 chunks_all.jsonl。
+#
+# `collection` / `locator` / `low_quality` 是后加的：老索引里没有这三列，
+# 读取时用 `_META_DEFAULTS` 兜底，所以旧索引不用重建也能查（只是地点显示
+# 退回行号、低质量标记为空）。
 _META_KEYS = (
     "chunk_id", "doc_id", "repo", "rel_path", "breadcrumb",
     "line_start", "line_end", "char_count", "cjk_count", "text",
+    "collection", "locator", "low_quality",
 )
+
+_META_DEFAULTS: dict = {
+    "line_start": 0,
+    "line_end": 0,
+    "low_quality": False,
+}
 
 
 def load_chunks(chunks_path: Path, limit: int | None = None) -> list[dict]:
@@ -137,8 +167,13 @@ def write_limited_chunks(chunks_path: Path, out_path: Path,
 
 
 def _meta_of(chunk: dict) -> dict:
-    return {k: chunk.get(k, "" if k not in ("line_start", "line_end") else 0)
-            for k in _META_KEYS}
+    out: dict = {}
+    for key in _META_KEYS:
+        if key in chunk:
+            out[key] = chunk[key]
+        else:
+            out[key] = _META_DEFAULTS.get(key, "")
+    return out
 
 
 def _make_embedder(kind: str, model_dir: Path | None, max_length: int,
@@ -287,6 +322,67 @@ def _encode_with_progress(embedder: Embedder, texts: list[str], batch_size: int,
     return np.concatenate(outs, axis=0) if len(outs) > 1 else outs[0]
 
 
+class _IndexPart:
+    """一个索引目录加载后的只读视图。
+
+    单索引模式只有一个 part（名字取 `cfg["collection"]`，通常为空串），多集合
+    模式每个集合一个。`bm25` / `dense` / `meta` 三条数据的行号必须一一对应，
+    加载时就断言，别等到检索时拿到错位的元数据。
+    """
+
+    def __init__(self, name: str, index_dir: Path, cfg: dict):
+        self.name = name
+        self.index_dir = Path(index_dir)
+        self.cfg = cfg
+
+        meta_path = self.index_dir / _INDEX_META
+        if not meta_path.exists():
+            raise FileNotFoundError(
+                f"索引目录 {self.index_dir} 里没有 {_INDEX_META}\n"
+                f"先建索引：  python ingest.py index --chunks <chunks.jsonl> "
+                f"--index-dir {self.index_dir}"
+            )
+        self.index_info = json.loads(meta_path.read_text(encoding="utf-8"))
+
+        chunks_meta = self.index_dir / _META_NAME
+        if not chunks_meta.exists():
+            raise FileNotFoundError(
+                f"索引目录 {self.index_dir} 里没有 {_META_NAME}，重新建索引"
+            )
+        meta: list[dict] = []
+        with chunks_meta.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line:
+                    meta.append(json.loads(line))
+        self.meta = meta
+
+        self.bm25 = BM25Index.load(self.index_dir)
+        self.dense = DenseIndex.load(self.index_dir, mmap=True)
+
+        if len(self.bm25) != self.dense.n_docs or len(self.meta) != self.dense.n_docs:
+            raise ValueError(
+                f"索引不一致（{self.label()}）：bm25={len(self.bm25)} "
+                f"dense={self.dense.n_docs} meta={len(self.meta)}。"
+                f"索引目录可能被部分覆盖，请重新建索引。"
+            )
+
+    def label(self) -> str:
+        return f"集合 {self.name}" if self.name else str(self.index_dir)
+
+    @property
+    def n_docs(self) -> int:
+        return int(self.dense.n_docs)
+
+    def is_low_quality(self, doc_index: int) -> bool:
+        """这一块的元数据是否被标了 low_quality（老索引没有该字段 -> False）。"""
+        return bool(self.meta[doc_index].get("low_quality"))
+
+    def collection_of(self, doc_index: int) -> str:
+        """来源集合名：优先用建索引时记的，退回索引自己的名字。"""
+        return str(self.meta[doc_index].get("collection") or self.name or "")
+
+
 class Retriever:
     """加载索引并执行检索。
 
@@ -299,16 +395,24 @@ class Retriever:
         r = Retriever(index_dir, cfg={"model_dir": r"G:\\kb\\models\\bge-m3"})
         hits = r.search("...", top_k=10, use_rerank=True)
 
+        # 多集合：各自检索 + 跨集合 RRF，结果带 collection 标记
+        r = Retriever({"tech": Path("data/index"),
+                       "profile": Path("data/index/profile")},
+                      cfg={"collections": {"tech": 1.0, "profile": 0.8}})
+        hits = r.search("项目经历", collections=["tech", "profile"])
+
     `embedder` 不传时会尝试按 `index_meta.json` 里记录的 embedder 类型
     自动构造。hashing 索引只查得到 hashing 的查询向量，onnx 索引同理 ——
     建索引和查询用的 embedder 必须是同一个，否则向量空间不对齐，检索结果
     是噪声（而且不会报错）。`build_index` 把类型记进 `index_meta.json`
     就是为了防这个，`_ensure_embedder` 在类型不匹配时直接抛错。
+
+    多集合时所有索引在 `__init__` 里加载一次（`self.parts`），查询期不再读盘。
     """
 
-    def __init__(self, index_dir: Path, embedder: Embedder | None = None,
+    def __init__(self, index_dir: Path | Mapping[str, Path],
+                 embedder: Embedder | None = None,
                  reranker: OnnxReranker | None = None, cfg: dict | None = None):
-        self.index_dir = Path(index_dir)
         self.cfg = dict(DEFAULT_CFG)
         if cfg:
             unknown = set(cfg) - set(DEFAULT_CFG) - {"model_dir", "reranker_dir"}
@@ -320,55 +424,66 @@ class Retriever:
         self.model_dir = self.cfg.get("model_dir")
         self.reranker_dir = self.cfg.get("reranker_dir")
 
-        self.index_info = self._read_index_meta()
+        # index_dir 可以是单个路径（向后兼容），也可以是 {集合名: 路径}
+        self.multi = isinstance(index_dir, Mapping)
+        if self.multi:
+            dirs = {str(k): Path(v) for k, v in index_dir.items()}
+            if not dirs:
+                raise ValueError("多集合检索至少要给一个索引目录")
+        else:
+            dirs = {str(self.cfg.get("collection") or ""): Path(index_dir)}
+        self.index_dirs = dirs
+
         self.embedder = embedder
         self.reranker = reranker
         self._reranker_checked = reranker is not None
 
-        self.meta = self._load_meta()
-        self.bm25 = BM25Index.load(self.index_dir)
-        self.dense = DenseIndex.load(self.index_dir, mmap=True)
+        self.parts: dict[str, _IndexPart] = {
+            name: _IndexPart(name, path, self.cfg) for name, path in dirs.items()
+        }
 
-        if len(self.bm25) != self.dense.n_docs or len(self.meta) != self.dense.n_docs:
-            raise ValueError(
-                f"索引不一致：bm25={len(self.bm25)} dense={self.dense.n_docs} "
-                f"meta={len(self.meta)}。索引目录可能被部分覆盖，请重新建索引。"
-            )
-        recorded = self.index_info.get("embedder")
-        if embedder is not None and recorded:
-            _assert_embedder_matches(embedder, recorded, self.index_info)
-        if embedder is not None and self.index_info.get("dim"):
-            if int(embedder.dim) != int(self.index_info["dim"]):
-                raise ValueError(
-                    f"embedder 维度({embedder.dim}) 与索引维度({self.index_info['dim']}) "
-                    f"不一致，检索结果会是噪声。请用建索引时的同一个 embedder。"
-                )
+        # 兼容单索引时代的属性：web / 评测脚本读 index_info、meta、index_dir
+        first = next(iter(self.parts.values()))
+        self.index_info = first.index_info
+        self.index_dir = first.index_dir
+        self.bm25 = first.bm25
+        self.dense = first.dense
+        if self.multi:
+            self.meta = [row for part in self.parts.values() for row in part.meta]
+        else:
+            self.meta = first.meta
+
+        self._check_embedders()
 
     # --------------------------------------------------------------- 加载
 
-    def _read_index_meta(self) -> dict:
-        path = self.index_dir / _INDEX_META
-        if not path.exists():
-            raise FileNotFoundError(
-                f"索引目录 {self.index_dir} 里没有 {_INDEX_META}\n"
-                f"先建索引：  python ingest.py index --chunks <chunks.jsonl> "
-                f"--index-dir {self.index_dir}"
-            )
-        return json.loads(path.read_text(encoding="utf-8"))
+    def _check_embedders(self) -> None:
+        """每个索引单独校验 embedder；多集合还要求它们是同一种。"""
+        recorded_kinds: set[str] = set()
+        dims: set[int] = set()
+        for part in self.parts.values():
+            recorded = part.index_info.get("embedder")
+            dim = part.index_info.get("dim")
+            if self.embedder is not None:
+                if recorded:
+                    _assert_embedder_matches(self.embedder, recorded, part.index_info)
+                if dim and int(self.embedder.dim) != int(dim):
+                    raise ValueError(
+                        f"embedder 维度({self.embedder.dim}) 与索引维度({dim}) "
+                        f"不一致（{part.label()}），检索结果会是噪声。"
+                        f"请用建索引时的同一个 embedder。"
+                    )
+            if recorded:
+                recorded_kinds.add(str(recorded).lower())
+            if dim:
+                dims.add(int(dim))
 
-    def _load_meta(self) -> list[dict]:
-        path = self.index_dir / _META_NAME
-        if not path.exists():
-            raise FileNotFoundError(
-                f"索引目录 {self.index_dir} 里没有 {_META_NAME}，重新建索引"
+        if self.embedder is None and (len(recorded_kinds) > 1 or len(dims) > 1):
+            raise ValueError(
+                f"多个集合的索引不是用同一个 embedder 建的："
+                f"{sorted(recorded_kinds)} / dim={sorted(dims)}。\n"
+                f"跨集合查询只有一个查询向量，必须统一；请显式传 embedder。"
             )
-        out = []
-        with path.open("r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if line:
-                    out.append(json.loads(line))
-        return out
 
     def _ensure_embedder(self) -> Embedder:
         if self.embedder is not None:
@@ -405,32 +520,75 @@ class Retriever:
 
     # --------------------------------------------------------------- 查询
 
-    def search(self, query: str, top_k: int = 10, *, use_dense: bool = True,
-               use_sparse: bool = True, use_rerank: bool = False) -> list[SearchHit]:
-        """执行检索。
+    def collection_names(self) -> list[str]:
+        """已加载的集合名（单索引模式下可能是一个空串）。"""
+        return list(self.parts)
 
-        `top_k` 覆盖 cfg 里的 `final_top_k`。`use_dense` / `use_sparse`
-        至少要开一个（两个都关没有候选集）。
+    def collection_weight(self, name: str) -> float:
+        """跨集合 RRF 时该集合的权重，默认 1.0。
+
+        `cfg["collections"]` 支持两种写法：直接给数字，或给一张带 `weight`
+        的表（与 TOML 的 `[collections.<name>]` 对齐）。
         """
-        if not use_dense and not use_sparse:
-            raise ValueError("use_dense 和 use_sparse 不能同时为 False")
-        query = (query or "").strip()
-        if not query:
-            return []
-        final_k = int(top_k) if top_k else int(self.cfg["final_top_k"])
+        overrides = self.cfg.get("collections") or {}
+        raw = overrides.get(name, 1.0) if isinstance(overrides, Mapping) else 1.0
+        if isinstance(raw, Mapping):
+            raw = raw.get("weight", 1.0)
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return 1.0
 
+    def _select_parts(self, collections) -> list[_IndexPart]:
+        if collections is None:
+            return list(self.parts.values())
+        if isinstance(collections, str):
+            names = [x.strip() for x in collections.split(",")]
+        else:
+            names = [str(x).strip() for x in collections]
+        names = [n for n in names if n]
+        if not names:
+            return list(self.parts.values())
+        # 单索引模式没有集合名可比（名字是空串），任何请求都当「未指定」
+        if "" in self.parts:
+            return list(self.parts.values())
+        missing = [n for n in names if n not in self.parts]
+        if missing:
+            raise ValueError(
+                f"没有这些集合的索引：{', '.join(missing)}；"
+                f"现有：{', '.join(self.parts)}。\n"
+                f"先建索引：python ingest.py index --collection {missing[0]}"
+            )
+        return [self.parts[n] for n in names]
+
+    def _query_vector(self, query: str) -> np.ndarray:
+        return self._ensure_embedder().encode([query], batch_size=1)[0]
+
+    def _part_rank(self, part: _IndexPart, query: str, qvec: np.ndarray | None,
+                   use_dense: bool, use_sparse: bool,
+                   include_low_quality: bool
+                   ) -> tuple[list[int], dict[int, float], str]:
+        """一个集合内部：dense / sparse 两路 -> RRF -> 名次列表。
+
+        低质量块在这一层就过滤掉，不能等到融合之后：被过滤掉的块如果参与了
+        名次计算，会把正常块往后挤，等于让垃圾数据占着名次不放。
+        """
         rankings: list[list[int]] = []
         weights: list[float] = []
         raw_scores: dict[int, float] = {}
-        if use_dense:
-            emb = self._ensure_embedder()
-            qvec = emb.encode([query], batch_size=1)[0]
-            dense_hits = self.dense.search(qvec, top_k=int(self.cfg["dense_top_k"]))
+        fusion_k = int(self.cfg["fusion_top_k"])
+
+        if use_dense and qvec is not None:
+            dense_hits = part.dense.search(qvec, top_k=int(self.cfg["dense_top_k"]))
+            if not include_low_quality:
+                dense_hits = [(i, s) for i, s in dense_hits if not part.is_low_quality(i)]
             rankings.append([i for i, _ in dense_hits])
             weights.append(float(self.cfg["dense_weight"]))
             raw_scores = dict(dense_hits)
         if use_sparse:
-            sparse_hits = self.bm25.search(query, top_k=int(self.cfg["sparse_top_k"]))
+            sparse_hits = part.bm25.search(query, top_k=int(self.cfg["sparse_top_k"]))
+            if not include_low_quality:
+                sparse_hits = [(i, s) for i, s in sparse_hits if not part.is_low_quality(i)]
             rankings.append([i for i, _ in sparse_hits])
             weights.append(float(self.cfg["sparse_weight"]))
             if not use_dense:
@@ -440,24 +598,79 @@ class Retriever:
             # 只有一路时不做 RRF：直接用原始分数。余弦相似度和 BM25 分数
             # 各自都有意义，评测单路效果时要用原始分数；RRF 会把它压成
             # 1/(60+rank) 这种只有名次含义的数，信息量反而变少。
-            fused = rankings[0][:int(self.cfg["fusion_top_k"])]
-            scores = raw_scores
-            source = "dense" if use_dense else "sparse"
-        else:
-            fused_all = rrf_fuse(rankings, k=int(self.cfg["rrf_k"]), weights=weights)
-            fused = [i for i, _ in fused_all[:int(self.cfg["fusion_top_k"])]]
-            scores = dict(fused_all)
-            source = "hybrid"
+            return rankings[0][:fusion_k], raw_scores, ("dense" if use_dense else "sparse")
 
-        hits = [self._to_hit(i, scores.get(i, 0.0), source, rank)
-                for rank, i in enumerate(fused, start=1)]
+        fused_all = rrf_fuse(rankings, k=int(self.cfg["rrf_k"]), weights=weights)
+        return ([i for i, _ in fused_all[:fusion_k]], dict(fused_all), "hybrid")
+
+    def search(self, query: str, top_k: int = 10, *, use_dense: bool = True,
+               use_sparse: bool = True, use_rerank: bool = False,
+               collections: list[str] | str | None = None,
+               include_low_quality: bool = False) -> list[SearchHit]:
+        """执行检索。
+
+        `top_k` 覆盖 cfg 里的 `final_top_k`。`use_dense` / `use_sparse`
+        至少要开一个（两个都关没有候选集）。
+
+        `collections` 只在多集合模式下有意义，只查指定的那几个；留空查全部。
+
+        `include_low_quality=False`（默认）排除被质量指标标成 `low_quality`
+        的块；查简历 / 扫描件时要复查这些块就传 True。
+
+        多集合时 `score` 是**跨集合 RRF 融合分**，`source` 统一为 `hybrid`：
+        名次才是可比量，绝对分数在集合之间、在 dense/sparse 之间都没有可比性。
+        """
+        if not use_dense and not use_sparse:
+            raise ValueError("use_dense 和 use_sparse 不能同时为 False")
+        query = (query or "").strip()
+        if not query:
+            return []
+        final_k = int(top_k) if top_k else int(self.cfg["final_top_k"])
+        parts = self._select_parts(collections)
+        qvec = self._query_vector(query) if use_dense else None
+
+        if len(parts) == 1:
+            part = parts[0]
+            order, scores, source = self._part_rank(
+                part, query, qvec, use_dense, use_sparse, include_low_quality
+            )
+            hits = [self._to_hit(part, i, scores.get(i, 0.0), source, rank)
+                    for rank, i in enumerate(order, start=1)]
+            if use_rerank:
+                hits = self._rerank(query, hits, final_k)
+            return hits[:final_k]
+
+        # ---- 多集合：各集合内部先融合，再按集合权重做一次跨集合 RRF ----
+        # 各集合的行号是各自的 0..N-1，先加上偏移变成全局 id 再交给 rrf_fuse，
+        # 否则 tech 的第 3 块和 profile 的第 3 块会被当成同一个文档。
+        rankings: list[list[int]] = []
+        weights_list: list[float] = []
+        mapping: dict[int, tuple[_IndexPart, int]] = {}
+        offset = 0
+        for part in parts:
+            order, _scores, _source = self._part_rank(
+                part, query, qvec, use_dense, use_sparse, include_low_quality
+            )
+            rankings.append([offset + i for i in order])
+            for i in order:
+                mapping[offset + i] = (part, i)
+            weights_list.append(self.collection_weight(part.name))
+            offset += part.n_docs
+
+        fused = rrf_fuse(rankings, k=int(self.cfg["rrf_k"]), weights=weights_list)
+        hits = []
+        for rank, (gid, score) in enumerate(
+                fused[:int(self.cfg["fusion_top_k"])], start=1):
+            part, local_index = mapping[gid]
+            hits.append(self._to_hit(part, local_index, float(score), "hybrid", rank))
 
         if use_rerank:
             hits = self._rerank(query, hits, final_k)
         return hits[:final_k]
 
-    def _to_hit(self, doc_index: int, score: float, source: str, rank: int) -> SearchHit:
-        m = self.meta[doc_index]
+    def _to_hit(self, part: _IndexPart, doc_index: int, score: float,
+                source: str, rank: int) -> SearchHit:
+        m = part.meta[doc_index]
         return SearchHit(
             chunk_id=m.get("chunk_id", ""),
             doc_id=m.get("doc_id", ""),
@@ -470,6 +683,8 @@ class Retriever:
             score=float(score),
             source=source,
             rank=rank,
+            collection=part.collection_of(doc_index),
+            locator=str(m.get("locator") or ""),
         )
 
     def _rerank(self, query: str, hits: list[SearchHit], final_k: int) -> list[SearchHit]:

@@ -32,6 +32,45 @@ skip_files = [
 ]
 
 # ============================================================
+#  集合（collection）：物理隔离的单位
+#  每个集合有自己的 raw_dir / index_dir / parser，互不读写。
+#
+#  入  库：python ingest.py ingest  --collection profile
+#          python ingest.py ingest  --collection profile --dry-run
+#  建索引：python ingest.py index   --collection profile
+#  查  询：python ingest.py search  "项目经历" --collection tech,profile
+#  删  除：python ingest.py drop    --collection profile --path xxx.pdf
+#
+#  parser：markdown=只认 .md / pdf=只认 .pdf / auto=按扩展名分派
+#  generation：disabled 表示该集合不走云端生成，只返回检索原文（隐私用，
+#              由 Phase 4/5 读取；Phase 1 只是把它存下来）
+#  weight：跨集合 RRF 融合时这一路的权重，默认 1.0
+#
+#  注意：tech 的 index_dir 仍然是 data/index（现有 18,276 块的索引原地不动），
+#        新集合各自用 data/index/<name>/。没有 [collections] 段时等价于
+#        只有一个 tech、raw_dir="data/raw"、index_dir="data/index"。
+# ============================================================
+
+[collections]
+default_search = ["tech"]        # search 不写 --collection 时查哪些集合（逗号分隔亦可）
+
+[collections.tech]
+raw_dir = "data/raw/tech"        # 技术文档（JavaGuide / CS-Notes / ... 在下一层）
+index_dir = "data/index"         # 沿用现有索引，不迁移、不重建
+parser = "markdown"
+
+[collections.papers]
+raw_dir = "data/raw/papers"
+index_dir = "data/index/papers"
+parser = "auto"
+
+[collections.profile]
+raw_dir = "data/raw/profile"
+index_dir = "data/index/profile"
+parser = "auto"
+generation = "disabled"          # 隐私：简历不走云端生成，只返回检索原文
+
+# ============================================================
 #  Phase 2 · 检索
 #  建索引：python ingest.py index --chunks <chunks.jsonl>
 #  查  询：python ingest.py search "查询词"

@@ -557,25 +557,36 @@ class TestSearchHit(unittest.TestCase):
             rel_path="docs/hashmap.md", breadcrumb="Java / 集合",
             line_start=12, line_end=88, text="中文正文 with english",
             score=0.8125, source="hybrid", rank=3,
+            collection="tech", locator="L12-88",
         )
         d = hit.to_dict()
         self.assertEqual(
             set(d),
             {"chunk_id", "doc_id", "repo", "rel_path", "breadcrumb",
-             "line_start", "line_end", "text", "score", "source", "rank"},
+             "line_start", "line_end", "text", "score", "source", "rank",
+             "collection", "locator"},
         )
         back = SearchHit.from_dict(d)
         self.assertEqual(back, hit)
         self.assertEqual(SearchHit.from_dict(hit.to_dict()).to_dict(), d)
+        self.assertEqual(back.collection, "tech")
+        self.assertEqual(back.locator, "L12-88")
 
     def test_from_dict_tolerates_missing_optional(self):
         hit = SearchHit.from_dict({"chunk_id": "x", "text": "t", "score": 1})
         self.assertEqual(hit.rank, 0)
         self.assertEqual(hit.line_start, 0)
+        # 老版本的 JSON 里没有这两个字段，必须能读回来
+        self.assertEqual(hit.collection, "")
+        self.assertEqual(hit.locator, "")
 
     def test_location(self):
         hit = SearchHit("c", "d", "JavaGuide", "docs/a.md", "", 3, 9, "t", 0.1, "dense")
         self.assertEqual(hit.location(), "JavaGuide/docs/a.md:3-9")
+        # 有 locator 时优先用它：PDF 没有行号，显示 P3 比 3-3 有意义
+        pdf = SearchHit("c", "d", "papers", "a.pdf", "", 3, 3, "t", 0.1, "hybrid",
+                        locator="P3")
+        self.assertEqual(pdf.location(), "papers/a.pdf:P3")
 
     def test_json_serializable(self):
         hit = SearchHit("c", "d", "r", "p", "b", 1, 2, "中文", 0.5, "sparse", 1)

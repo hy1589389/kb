@@ -469,18 +469,22 @@ def _merge_small(chunks: list[Chunk], min_chars: int, max_chars: int) -> list[Ch
     return absorbed
 
 
-def chunk_document(
-    md_text: str,
+def chunk_sections(
+    sections: list[Section],
     *,
     max_chars: int = 1200,
     min_chars: int = 120,
     drop_below: int = 40,
     overlap: int = 120,
     code_block_max_chars: int = 2400,
-) -> tuple[str, list[Chunk]]:
-    """把一个 Markdown 文档切成 Chunk 列表，返回 (文档标题, chunks)。"""
-    title, sections = parse_sections(md_text)
+) -> list[Chunk]:
+    """把 `Section` 列表切成 `Chunk` 列表 —— 与具体格式无关的那一半。
 
+    Markdown 走 `parse_sections` 拿 Section，PDF 走 `pdf.py` 的版面分析拿
+    Section（标题来自字号，`line_start`/`line_end` 填页码），两者的切分规则
+    完全一致：超长则按段落二次切分并补 overlap，过小的相邻块合并，仍然不足
+    `drop_below` 的丢弃。参数含义见 `chunk_document`。
+    """
     raw: list[Chunk] = []
     for sec in sections:
         if len(sec.text) <= max_chars:
@@ -511,6 +515,28 @@ def chunk_document(
 
     for i, c in enumerate(chunks):
         c.index = i
+    return chunks
+
+
+def chunk_document(
+    md_text: str,
+    *,
+    max_chars: int = 1200,
+    min_chars: int = 120,
+    drop_below: int = 40,
+    overlap: int = 120,
+    code_block_max_chars: int = 2400,
+) -> tuple[str, list[Chunk]]:
+    """把一个 Markdown 文档切成 Chunk 列表，返回 (文档标题, chunks)。"""
+    title, sections = parse_sections(md_text)
+    chunks = chunk_sections(
+        sections,
+        max_chars=max_chars,
+        min_chars=min_chars,
+        drop_below=drop_below,
+        overlap=overlap,
+        code_block_max_chars=code_block_max_chars,
+    )
     return title, chunks
 
 

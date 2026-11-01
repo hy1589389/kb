@@ -78,19 +78,42 @@ def resolve_source_path(chunk: Any, raw_dir: Path | str) -> Path | None:
         return None
 
     repo_text = str(_field(chunk, "repo", "") or "").strip()
+    repo: Path | None = None
     if repo_text:
         repo = Path(repo_text)
         if repo.is_absolute() or repo.drive or repo.anchor:
             return None
-        rel = repo / rel
 
-    candidate = (base / rel).resolve()
-    # resolve() 之后仍然要判：`..`、符号链接、盘符跳转都在这一步收敛。
-    if not candidate.is_relative_to(base):
-        return None
-    if not candidate.is_file():
-        return None
-    return candidate
+    # 多集合之后有三种布局，都要支持：
+    #   Markdown 集合：<raw_dir>/<collection>/<repo>/<rel_path>
+    #   PDF 集合：    <raw_dir>/<collection>/<rel_path>（平铺，repo 只是文件名）
+    #   旧单集合布局：<raw_dir>/<repo>/<rel_path>（没有 collection 字段时）
+    #
+    # 判据是「<基准目录>/<repo> 是不是目录」，而不是「哪个文件存在」——
+    # 后者在集合根下恰好有同名文件时会拼错。
+    bases: list[Path] = []
+    collection = str(_field(chunk, "collection", "") or "").strip()
+    if collection and (base / collection).is_dir():
+        bases.append(base / collection)
+    elif not collection:
+        # 旧索引（多集合改造前建的）里没有 collection 字段，而语料已经挪到了
+        # <raw_dir>/<collection>/ 下。这里把一级子目录也当候选 —— 不这么做的话
+        # Web 的 /api/open 直接查原始 meta 字典时会拼不出路径。
+        try:
+            bases.extend(sorted(p for p in base.iterdir() if p.is_dir()))
+        except OSError:
+            pass
+    bases.append(base)
+
+    for b in bases:
+        candidate = b / repo / rel if (repo is not None and (b / repo).is_dir()) else b / rel
+        resolved = candidate.resolve()
+        # resolve() 之后仍然要判：`..`、符号链接、盘符跳转都在这一步收敛。
+        if not resolved.is_relative_to(base):
+            continue
+        if resolved.is_file():
+            return resolved
+    return None
 
 
 def _find_executable(name: str | None) -> str | None:
