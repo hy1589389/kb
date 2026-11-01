@@ -13,6 +13,12 @@
     POST /api/ask          {"q": ..., "top_k": ...} -> Answer.to_dict()
     GET  /api/open         chunk_id -> 编辑器打开源文件
     GET  /api/health       块数 / embedder / 就绪状态
+    GET  /api/stats        索引统计（块数 / 各仓库块数 / 平均长度 / 目录大小）
+
+`/api/stats` 要读一遍 24 MB 的 `chunks_meta.jsonl`，所以只在 `create_app`
+时算一次，结果缓存在 `app.state.stats`；之后每个请求只是把缓存抄一遍。
+这是启动期的一次性成本（真实索引 18276 行约 0.3 秒），换掉的是「每次有人点
+统计按钮就阻塞事件循环扫一遍文件」。
 
 `/api/open` 需要知道 chunk 的 repo/rel_path/行号。`Retriever` 自己持有全部
 元数据（`.meta`），这里做两件事：优先查「本次进程里见过的检索结果」缓存，
@@ -22,6 +28,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 from typing import Any
@@ -100,6 +107,116 @@ def _count_chunks(retriever: Any) -> int:
     return int(getattr(dense, "n_docs", 0) or 0)
 
 
+def _int_or(value: Any, default: int = 0) -> int:
+    """`int()` 的宽容版：索引里的 char_count 可能是 None / 字符串 / 浮点。"""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _iter_chunk_meta(path: Path):
+    """逐行产出 `chunks_meta.jsonl` 里的 dict；空行和坏行直接跳过。
+
+    单独抽成生成器有两个好处：24 MB 的文件不会一次性读进内存；测试可以
+    mock 它来数「到底扫了几遍索引」。
+    """
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict):
+                yield row
+
+
+def _dir_size_mb(path: Path) -> float:
+    """目录总大小（MiB，保留 1 位）。单个文件 stat 失败不影响整体。"""
+    total = 0
+    try:
+        for item in path.rglob("*"):
+            try:
+                if item.is_file():
+                    total += item.stat().st_size
+            except OSError:
+                continue
+    except OSError:
+        return 0.0
+    return round(total / (1024 * 1024), 1)
+
+
+# 没有 repo 字段的块归到这个桶里，保证「各仓库块数之和 == chunks」恒成立
+_UNKNOWN_REPO = "(未标注仓库)"
+
+
+def _build_stats(retriever: Any) -> dict:
+    """扫描索引目录，算出 `/api/stats` 的响应体。
+
+    只在 `create_app` 里调用一次。`chunks_meta.jsonl` 是主数据源；读不到时
+    退回 retriever 内存里的 `meta`，再不行用 `_count_chunks`。任何一步失败
+    都只是让统计变粗，不能让服务起不来。
+    """
+    raw_index_dir = str(getattr(retriever, "index_dir", "") or "").strip()
+    try:
+        index_dir = Path(raw_index_dir) if raw_index_dir else None
+    except (OSError, ValueError):
+        index_dir = None
+
+    counts: dict[str, int] = {}
+    chunks = 0
+    total_chars = 0
+
+    meta_path = index_dir / "chunks_meta.jsonl" if index_dir is not None else None
+    if meta_path is not None and meta_path.is_file():
+        try:
+            for row in _iter_chunk_meta(meta_path):
+                chunks += 1
+                repo = str(row.get("repo") or "").strip() or _UNKNOWN_REPO
+                counts[repo] = counts.get(repo, 0) + 1
+                size = row.get("char_count")
+                if size is None:
+                    size = len(str(row.get("text") or ""))
+                total_chars += max(0, _int_or(size))
+        except OSError:
+            counts.clear()
+            chunks = 0
+            total_chars = 0
+
+    if not chunks:
+        # 假 retriever / 索引目录不完整时的退路：不读文件，用已经加载的元数据
+        for item in getattr(retriever, "meta", None) or []:
+            data = _as_dict(item)
+            repo = str(data.get("repo") or "").strip() or _UNKNOWN_REPO
+            counts[repo] = counts.get(repo, 0) + 1
+            size = data.get("char_count")
+            if size is None:
+                size = len(str(data.get("text") or ""))
+            total_chars += max(0, _int_or(size))
+            chunks += 1
+        if not chunks:
+            chunks = _count_chunks(retriever)
+        if chunks and not counts:
+            counts[_UNKNOWN_REPO] = chunks
+
+    repos = [
+        {"name": name, "chunks": number}
+        for name, number in sorted(counts.items(),
+                                   key=lambda kv: (-kv[1], kv[0]))
+    ]
+    return {
+        "chunks": chunks,
+        "repos": repos,
+        "avg_chars": int(round(total_chars / chunks)) if chunks else 0,
+        "index_dir": str(index_dir) if index_dir is not None else "",
+        "index_size_mb": _dir_size_mb(index_dir) if (
+            index_dir is not None and index_dir.is_dir()) else 0.0,
+    }
+
+
 def create_app(retriever: Any, answerer: Any = None, *,
                raw_dir: Path | str, editor: str | None = None) -> FastAPI:
     """构造 FastAPI 应用。
@@ -130,6 +247,8 @@ def create_app(retriever: Any, answerer: Any = None, *,
     app.state.answerer = answerer
     app.state.raw_dir = raw_root
     app.state.editor = active_editor
+    # 一次算好；`/api/stats` 只读这个缓存，不再碰磁盘
+    app.state.stats = _build_stats(retriever)
 
     hit_cache: dict[str, dict] = {}
     meta_index: dict[str, dict] | None = None
@@ -326,5 +445,13 @@ def create_app(retriever: Any, answerer: Any = None, *,
             "editor": active_editor,
             "dim": int(info.get("dim") or 0),
         }
+
+    @app.get("/api/stats")
+    def api_stats() -> dict:
+        """索引统计。数值在 `create_app` 时算好，这里只做一次浅拷贝。"""
+        stats = getattr(app.state, "stats", None) or {}
+        body = dict(stats)
+        body["repos"] = [dict(repo) for repo in body.get("repos") or []]
+        return body
 
     return app

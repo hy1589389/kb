@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import sys
@@ -566,6 +567,328 @@ class WebAppTests(TempCorpus):
         self.assertIs(app.state.answerer, answerer)
         self.assertEqual(app.state.editor, "code")
         self.assertEqual(app.state.raw_dir, self.raw.resolve())
+
+
+# ---------------------------------------------------------------- /api/stats
+
+
+class StatsTests(TempCorpus):
+    """`/api/stats`：数值来自 chunks_meta.jsonl，且只在 create_app 时扫一遍。"""
+
+    ROWS = [
+        {"chunk_id": "chunk-1", "repo": "JavaGuide", "char_count": 100},
+        {"chunk_id": "chunk-2", "repo": "CS-Notes", "char_count": 200},
+        {"chunk_id": "chunk-3", "repo": "JavaGuide", "char_count": 300},
+    ]
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.hits = [
+            make_hit(1),
+            make_hit(2, repo="CS-Notes", rel_path="notes/rag.md"),
+            make_hit(3),
+        ]
+        self.index = self.tmp / "index"
+        self.index.mkdir()
+        self.write_meta(self.ROWS)
+        # 1 MiB + 2 KiB，方便断言 index_size_mb 真的是按目录累计的
+        self.blob = self.index / "blob.bin"
+        self.blob.write_bytes(b"x" * (1024 * 1024 + 2048))
+
+    def write_meta(self, rows: list[dict]) -> None:
+        text = "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows)
+        (self.index / "chunks_meta.jsonl").write_text(text, encoding="utf-8")
+
+    def build_app(self, index_dir: Path | None = None):
+        retriever = FakeRetriever(self.hits)
+        retriever.index_dir = str(self.index if index_dir is None else index_dir)
+        return create_app(retriever, None, raw_dir=self.raw, editor="code")
+
+    def test_stats_fields_complete(self) -> None:
+        app = self.build_app()
+        with TestClient(app) as client:
+            res = client.get("/api/stats")
+
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        self.assertEqual(
+            set(body),
+            {"chunks", "repos", "avg_chars", "index_dir", "index_size_mb"},
+        )
+        self.assertEqual(body["chunks"], 3)
+        self.assertEqual(body["avg_chars"], 200)          # (100 + 200 + 300) / 3
+        self.assertEqual(body["index_dir"], str(self.index))
+        self.assertIsInstance(body["repos"], list)
+
+    def test_stats_repos_sorted_and_sum_to_chunks(self) -> None:
+        app = self.build_app()
+        with TestClient(app) as client:
+            body = client.get("/api/stats").json()
+
+        repos = body["repos"]
+        self.assertEqual([repo["name"] for repo in repos], ["JavaGuide", "CS-Notes"])
+        self.assertEqual([repo["chunks"] for repo in repos], [2, 1])
+        self.assertEqual(sum(repo["chunks"] for repo in repos), body["chunks"])
+        for repo in repos:
+            self.assertEqual(set(repo), {"name", "chunks"})
+
+    def test_stats_index_size_mb_counts_nested_files(self) -> None:
+        nested = self.index / "sub"
+        nested.mkdir()
+        (nested / "extra.bin").write_bytes(b"y" * 4096)
+        expected = sum(
+            path.stat().st_size for path in self.index.rglob("*") if path.is_file()
+        ) / (1024 * 1024)
+
+        app = self.build_app()
+        with TestClient(app) as client:
+            body = client.get("/api/stats").json()
+
+        self.assertGreater(body["index_size_mb"], 0.9)
+        self.assertAlmostEqual(body["index_size_mb"], round(expected, 1), places=1)
+
+    def test_stats_scans_index_only_once(self) -> None:
+        with mock.patch.object(web_app, "_iter_chunk_meta",
+                               wraps=web_app._iter_chunk_meta) as rows:
+            app = self.build_app()
+            with TestClient(app) as client:
+                bodies = [client.get("/api/stats").json() for _ in range(4)]
+
+        self.assertEqual(rows.call_count, 1,
+                         "chunks_meta.jsonl 被重复扫描了，统计必须缓存在 create_app")
+        self.assertEqual(bodies[0], bodies[-1])
+        self.assertEqual(app.state.stats["chunks"], 3)
+
+    def test_stats_is_cached_not_recomputed(self) -> None:
+        app = self.build_app()
+        # create_app 之后再改索引：接口应该仍然返回启动时的缓存
+        self.write_meta(self.ROWS[:1])
+        with TestClient(app) as client:
+            body = client.get("/api/stats").json()
+
+        self.assertEqual(body["chunks"], 3)
+        self.assertEqual(app.state.stats["chunks"], 3)
+
+    def test_stats_falls_back_to_retriever_meta(self) -> None:
+        # 索引目录不存在（假 retriever / 只加载了一半）：退回内存里的 meta
+        missing = self.tmp / "no-such-index"
+        app = self.build_app(index_dir=missing)
+        with TestClient(app) as client:
+            body = client.get("/api/stats").json()
+
+        self.assertEqual(body["chunks"], 3)
+        self.assertEqual(body["avg_chars"], len(HIT_TEXT))
+        self.assertEqual(body["index_size_mb"], 0.0)
+        self.assertEqual(body["index_dir"], str(missing))
+        counts = {repo["name"]: repo["chunks"] for repo in body["repos"]}
+        self.assertEqual(counts, {"JavaGuide": 2, "CS-Notes": 1})
+        self.assertEqual(sum(counts.values()), body["chunks"])
+
+    def test_stats_empty_index_returns_zeros(self) -> None:
+        retriever = FakeRetriever([])
+        retriever.index_dir = str(self.tmp / "empty-index")
+        app = create_app(retriever, None, raw_dir=self.raw, editor="code")
+        with TestClient(app) as client:
+            body = client.get("/api/stats").json()
+
+        self.assertEqual(body["chunks"], 0)
+        self.assertEqual(body["repos"], [])
+        self.assertEqual(body["avg_chars"], 0)
+        self.assertEqual(body["index_size_mb"], 0.0)
+
+    def test_stats_groups_missing_repo_but_keeps_total(self) -> None:
+        # repo 字段缺失的块归到「(未标注仓库)」，保证求和恒等于 chunks
+        self.write_meta([
+            {"chunk_id": "a", "repo": "", "char_count": 10},
+            {"chunk_id": "b", "repo": "JavaGuide", "char_count": 30},
+        ])
+        app = self.build_app()
+        with TestClient(app) as client:
+            body = client.get("/api/stats").json()
+
+        counts = {repo["name"]: repo["chunks"] for repo in body["repos"]}
+        self.assertEqual(counts, {"(未标注仓库)": 1, "JavaGuide": 1})
+        self.assertEqual(body["chunks"], 2)
+        self.assertEqual(sum(counts.values()), body["chunks"])
+
+    def test_stats_route_rejects_non_get(self) -> None:
+        app = self.build_app()
+        with TestClient(app) as client:
+            res = client.post("/api/stats")
+        self.assertEqual(res.status_code, 405)
+
+
+# ---------------------------------------------------------------- 前端静态契约
+
+
+class FrontendHtmlTests(unittest.TestCase):
+    """单文件前端不能靠构建工具兜底，这些契约只能静态检查。"""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.html = web_app.INDEX_HTML.read_text(encoding="utf-8")
+        cls.scripts = re.findall(r"<script>(.*?)</script>", cls.html, re.S)
+        cls.script = "\n".join(cls.scripts)
+        cls.ids = set(re.findall(r'id="([^"]+)"', cls.html))
+
+    def test_new_feature_ids_exist(self) -> None:
+        expected = {
+            # 历史面板
+            "history-panel", "history-list", "history-clear",
+            # 仓库筛选
+            "filters", "filter-chips", "filter-summary",
+            # 主题 / 统计 / 错误重试
+            "theme-toggle", "stats-panel", "stats-body", "stats-btn", "stats-close",
+            "retry-btn", "error-text", "status-chips",
+            # 状态容器
+            "loading", "empty-state", "toast",
+        }
+        self.assertEqual(sorted(expected - self.ids), [],
+                         "index.html 缺少新增元素 id")
+        legacy = {"query-input", "search-btn", "mode-ask", "mode-search",
+                  "results", "answer-panel", "status-bar"}
+        self.assertEqual(sorted(legacy - self.ids), [], "原有 id 被删了")
+
+    def test_script_ids_are_all_defined(self) -> None:
+        """JS 里 $('x') / getElementById('x') 引用的 id 必须都在 HTML 里。"""
+        self.assertTrue(self.scripts, "index.html 里没有内联 <script>")
+        used = set(re.findall(r"\$\('([A-Za-z0-9_-]+)'\)", self.script))
+        used |= set(re.findall(r"getElementById\('([A-Za-z0-9_-]+)'\)", self.script))
+        # on('x', ...) 也是按 id 找元素，一并检查
+        used |= set(re.findall(r"on\('([A-Za-z0-9_-]+)'", self.script))
+        # 新增功能的关键 id 必须真的被脚本用到，而不是只写在 HTML 里
+        exercised = {"query-input", "history-panel", "filter-chips",
+                     "theme-toggle", "stats-panel", "retry-btn"}
+        self.assertEqual(sorted(exercised - used), [])
+        self.assertEqual(sorted(used - self.ids - {"citation-"}), [])
+
+    def test_no_external_resources(self) -> None:
+        lowered = self.html.lower()
+        for needle in ('src="http', 'href="http', "@import", "<script src=",
+                       "cdn.", "unpkg", "jsdelivr", "googleapis"):
+            self.assertNotIn(needle, lowered, f"index.html 引用了外部资源 {needle!r}")
+        self.assertNotIn("<link", lowered)
+        self.assertIn("-apple-system", self.html)      # 系统字体栈
+        self.assertIn("Microsoft YaHei", self.html)
+
+    def test_highlight_escapes_before_inserting_mark(self) -> None:
+        self.assertIn("function escapeHtml", self.script)
+        for entity in ("&amp;", "&lt;", "&gt;", "&quot;", "&#39;"):
+            self.assertIn(entity, self.script)
+        # 允许写 innerHTML 的地方只有 highlightHtml() 的返回值
+        assignments = re.findall(r"\.innerHTML\s*=\s*([^;]+);", self.script)
+        self.assertEqual(len(assignments), 2, assignments)
+        for expression in assignments:
+            self.assertTrue(expression.strip().startswith("highlightHtml("), expression)
+        self.assertIn(
+            "'<mark class=\"hl\">' + escapeHtml(match[0]) + '</mark>'",
+            self.script,
+        )
+        # 非高亮字段一律走 textContent
+        self.assertIn("'crumb', item.breadcrumb", self.script)
+        self.assertNotRegex(self.script, r"innerHTML\s*=\s*item\.")
+
+    def test_history_storage_contract(self) -> None:
+        self.assertIn("'kb.searchHistory'", self.script)
+        self.assertIn("HISTORY_LIMIT = 20", self.script)
+        self.assertIn("window.localStorage.setItem", self.script)
+        self.assertRegex(self.script, r"ts:\s*Date\.now\(\)")
+        # 同 q + mode 去重后移到最前
+        self.assertIn("item.q === query && item.mode === mode", self.script)
+        self.assertIn("rest.unshift({ q: query, mode: mode, ts: Date.now() })",
+                      self.script)
+        # 相对时间四档
+        for needle in ("'刚刚'", "'分钟前'", "'小时前'"):
+            self.assertIn(needle, self.script)
+        self.assertIn("pad2(date.getMonth() + 1) + '-' + pad2(date.getDate())",
+                      self.script)
+
+    def test_url_state_contract(self) -> None:
+        self.assertIn("window.history.replaceState", self.script)
+        self.assertIn("url.searchParams.set('q', query)", self.script)
+        self.assertIn("url.searchParams.set('mode', mode)", self.script)
+        self.assertIn("new URLSearchParams(window.location.search)", self.script)
+        self.assertIn("if (initial.q)", self.script)   # 载入时自动复现查询
+        self.assertIn("applyMode(initial.mode)", self.script)
+
+    def test_keyboard_shortcut_contract(self) -> None:
+        self.assertIn("event.key === '/'", self.script)
+        self.assertIn("!isTypingTarget(event.target)", self.script)
+        self.assertIn("event.key === 'Escape'", self.script)
+        self.assertIn("event.key === 'ArrowDown' || event.key === 'ArrowUp'",
+                      self.script)
+        self.assertIn("openSelected", self.script)
+        self.assertIn("setAttribute('data-action', 'open')", self.script)
+        self.assertIn("moveSelection", self.script)
+
+    def test_theme_contract(self) -> None:
+        self.assertIn("'(prefers-color-scheme: dark)'", self.script)
+        self.assertIn("var THEMES = ['auto', 'light', 'dark'];", self.script)
+        self.assertIn("'kb.theme'", self.script)
+        self.assertIn("setAttribute('data-theme'", self.script)
+        self.assertIn(':root[data-theme="dark"]', self.html)
+        self.assertIn("☀", self.html)
+        self.assertIn("🌙", self.script)
+
+    def test_copy_citation_contract(self) -> None:
+        self.assertIn("navigator.clipboard.writeText", self.script)
+        self.assertIn("document.execCommand('copy')", self.script)
+        self.assertIn("'已复制'", self.script)
+        self.assertIn("1500", self.script)             # 1.5 秒后还原
+        self.assertIn("'[' + label + '](' + target + ')'", self.script)
+        self.assertIn("item.breadcrumb ? item.breadcrumb : path", self.script)
+        self.assertIn("item.line_start ? ':' + item.line_start : ''", self.script)
+
+    def test_loading_empty_error_and_refusal_states(self) -> None:
+        self.assertEqual(self.html.count('class="skeleton"'), 3)
+        self.assertIn("'搜索中…'", self.script)        # 按钮文案
+        self.assertIn('id="retry-btn"', self.html)
+        self.assertIn("showError", self.script)
+        for needle in ("换个关键词", "去掉筛选条件", "试试问答模式"):
+            self.assertIn(needle, self.script)
+        # 拒答要有独立的警示样式，并保留检索结果入口
+        self.assertIn("refuse-reason", self.html)
+        self.assertIn(".answer-card.refused", self.html)
+        self.assertIn("state.results = (data.hits || []).map(normalizeResult)",
+                      self.script)
+
+    def test_stats_panel_contract(self) -> None:
+        self.assertIn("openStats", self.script)
+        self.assertIn("api('/api/stats')", self.script)
+        self.assertIn("state.stats", self.script)
+        self.assertIn("index_size_mb", self.script)
+        self.assertIn("avg_chars", self.script)
+        self.assertIn("stats-table", self.html)
+
+
+class WebAppSecurityTests(TempCorpus):
+    """接口里的敌意文本以 JSON 返回（不渲染），HTML 模板里没有数据拼接。"""
+
+    def test_search_returns_hostile_text_as_json(self) -> None:
+        hostile_text = "命中 <script>alert('xss')</script> & <img src=x onerror=alert(1)>"
+        hostile_breadcrumb = "<img src=x onerror=alert(1)>"
+        hit = SearchHit(
+            chunk_id="chunk-x", doc_id="doc-x", repo="JavaGuide",
+            rel_path="docs/hashmap.md", breadcrumb=hostile_breadcrumb,
+            line_start=1, line_end=2, text=hostile_text, score=0.1,
+            source="hybrid", rank=1,
+        )
+        retriever = FakeRetriever([hit])
+        app = create_app(retriever, None, raw_dir=self.raw, editor="code")
+        with TestClient(app) as client:
+            res = client.get("/api/search", params={"q": "script"})
+            index = client.get("/")
+
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.headers["content-type"].startswith("application/json"),
+                        "命中文本必须走 JSON，浏览器不会把它当 HTML 解析")
+        body = res.json()
+        self.assertEqual(body["results"][0]["text"], hostile_text)
+        self.assertEqual(body["results"][0]["breadcrumb"], hostile_breadcrumb)
+        self.assertIn("<script>", res.text)   # JSON 原样返回，靠 content-type 兜底
+        # 首页是静态模板，不会把接口数据拼进去
+        self.assertNotIn("<script>alert", index.text)
+        self.assertNotIn("onerror=alert", index.text)
 
 
 if __name__ == "__main__":
