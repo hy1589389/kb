@@ -1,12 +1,14 @@
 """配置加载：零依赖，用标准库 tomllib（Python 3.11+）读取 config.toml。
 
-两个 dataclass 对应 TOML 里的两段互不相干的配置：
+每个 dataclass 对应 TOML 里的一段，彼此互不相干：
 
     IngestConfig     [path] / [chunk] / [filter]        Phase 1 语料入库
     RetrievalConfig  [retrieval]                        Phase 2 检索
+    GenerateConfig   [generate]                         Phase 4 生成
+    WebConfig        [web]                              Phase 5 Web 界面
 
-`IngestConfig.load()` 会把 `[retrieval]` 一并解析挂在 `.retrieval` 上，
-所以调用方读一次 TOML 就能拿到全部配置；`RetrievalConfig.load()` 单独
+`IngestConfig.load()` 会把后三段一并解析，挂在 `.retrieval` / `.generate` /
+`.web` 上，所以调用方读一次 TOML 就能拿到全部配置；各自的 `load()` 单独
 用也可以。
 """
 
@@ -219,6 +221,50 @@ class GenerateConfig:
 
 
 @dataclass
+class WebConfig:
+    """Phase 5 Web 界面参数，对应 config.toml 的 `[web]` 段。
+
+    `editor` 留空表示自动探测：先找 `code`（能跳行），再退到 `notepad`
+    （只能打开文件）。填了值就固定用它，写命令名（`code`）或可执行文件
+    绝对路径都可以。
+
+    这里不放开 `raw_dir`：语料根目录只有 `[path].raw_dir` 一个来源，
+    两处配置同一个目录迟早会不一致。要换目录用 `--raw-dir`。
+    """
+
+    host: str = "127.0.0.1"
+    port: int = 8000
+    editor: str = ""
+
+    @classmethod
+    def load(cls, config_path: Path | None = None) -> "WebConfig":
+        cfg = cls()
+        if config_path is None or not Path(config_path).exists():
+            return cfg
+        data = tomllib.loads(Path(config_path).read_text(encoding="utf-8"))
+        cfg.apply_section(data.get("web", {}))
+        return cfg
+
+    def apply_section(self, section: dict) -> "WebConfig":
+        """把 TOML 的 [web] 段套到默认值上，类型推断方式同 RetrievalConfig。"""
+        for f in fields(self):
+            if f.name not in section:
+                continue
+            default = self.__dict__[f.name]
+            raw = section[f.name]
+            if isinstance(default, bool):
+                value: object = bool(raw)
+            elif isinstance(default, int):
+                value = int(raw)
+            elif isinstance(default, float):
+                value = float(raw)
+            else:
+                value = str(raw)
+            self.__dict__[f.name] = value
+        return self
+
+
+@dataclass
 class IngestConfig:
     raw_dir: Path = Path("data/raw")
     out_dir: Path = Path("data/processed")
@@ -231,6 +277,8 @@ class IngestConfig:
     # Phase 4 的生成配置，同理。新增这两个字段不影响 Phase 1 的行为：
     # 它们只在 load() 里被 TOML 覆盖，Phase 1 代码根本不读。
     generate: GenerateConfig = field(default_factory=GenerateConfig)
+    # Phase 5 的 Web 配置，同理。
+    web: WebConfig = field(default_factory=WebConfig)
 
     @classmethod
     def load(cls, config_path: Path | None = None) -> "IngestConfig":
@@ -260,6 +308,8 @@ class IngestConfig:
         cfg.retrieval.apply_section(data.get("retrieval", {}))
         # Phase 4：同一份 TOML 里的 [generate] 段
         cfg.generate.apply_section(data.get("generate", {}))
+        # Phase 5：同一份 TOML 里的 [web] 段
+        cfg.web.apply_section(data.get("web", {}))
         return cfg
 
     def resolve(self, project_root: Path) -> "IngestConfig":

@@ -5,6 +5,7 @@
     index    建稠密 + 稀疏检索索引                        （Phase 2）
     search   查询索引，人类可读或 --json 输出              （Phase 2）
     ask      检索 + 大模型生成带引用的答案                 （Phase 4）
+    web      启动本地 Web 界面（检索 / 问答 / 打开源文件）  （Phase 5）
 """
 
 from __future__ import annotations
@@ -113,6 +114,27 @@ def _load_retrieval_config(args: argparse.Namespace):
     if getattr(args, "max_length", None):
         rc.embed_max_length = int(args.max_length)
     return rc
+
+
+def _load_ingest_config(args: argparse.Namespace) -> IngestConfig:
+    """读整份 config.toml（[path] / [web] 等）。
+
+    `[retrieval]` 段仍走 `_load_retrieval_config`，那边有命令行覆盖逻辑；
+    这里只服务「语料根目录」和 Web 配置这类不需要命令行逐项覆盖的字段。
+    """
+    cfg_path = Path(args.config) if getattr(args, "config", None) else DEFAULT_CONFIG
+    return IngestConfig.load(cfg_path)
+
+
+def _resolve_raw_dir(args: argparse.Namespace) -> Path:
+    """语料根目录：`--raw-dir` 优先，否则用 `[path].raw_dir`（相对项目根展开）。
+
+    `<raw_dir>/<repo>/<rel_path>` 就是检索结果对应的真实文件。
+    """
+    if getattr(args, "raw_dir", None):
+        return Path(args.raw_dir).resolve()
+    raw = _load_ingest_config(args).raw_dir
+    return raw if raw.is_absolute() else (PROJECT_ROOT / raw).resolve()
 
 
 def cmd_index(args: argparse.Namespace) -> int:
@@ -245,11 +267,19 @@ def cmd_search(args: argparse.Namespace) -> int:
             "hits": [h.to_dict() for h in hits],
         }
         sys.stdout.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+        if args.open_index is not None:
+            # stdout 已经是一份 JSON，打开编辑器的说明只能走 stderr，
+            # 否则管道下游会拿到半截 JSON。
+            print("[!] --json 模式下 --open 的输出改走 stderr", file=sys.stderr)
+            return _open_hit(args, hits, out=sys.stderr)
         return 0
 
     if not hits:
         print(f"没有命中：{args.query}")
         print("（检查 --no-dense / --no-sparse 是否把两路都关了，或者换个查询词）")
+        if args.open_index is not None:
+            print(f"[X] --open {args.open_index} 没有可打开的结果：本次 0 条")
+            return 1
         return 0
 
     print(f"查询: {args.query}")
@@ -262,7 +292,53 @@ def cmd_search(args: argparse.Namespace) -> int:
         print(f"     {hit.location()}")
         print(f"     {_summarize(hit.text)}")
         print("-" * 68)
+    print(f"提示：用 --open N 打开第 N 条结果的源文件（N 从 1 开始，例如 --open 1）")
+
+    if args.open_index is not None:
+        return _open_hit(args, hits)
     return 0
+
+
+def _open_hit(args: argparse.Namespace, hits: list, *,
+              out=None) -> int:
+    """`search --open N`：用编辑器打开第 N 条结果的源文件并跳到行号。
+
+    返回 0 表示「结果存在且编辑器拉起来了」，1 表示 N 越界 / 找不到源文件 /
+    没有可用编辑器。这些都不是异常情况，所以只打印说明、不抛栈。
+    """
+    from .web.editor import open_in_editor, resolve_source_path
+
+    stream = out if out is not None else sys.stdout
+    try:
+        n = int(args.open_index)
+    except (TypeError, ValueError):
+        print(f"[X] --open 需要一个从 1 开始的整数，收到：{args.open_index!r}", file=stream)
+        return 1
+
+    if n < 1 or n > len(hits):
+        print(f"[X] --open {n} 超出范围：本次只有 {len(hits)} 条结果（N 从 1 开始）",
+              file=stream)
+        return 1
+
+    hit = hits[n - 1]
+    raw_dir = _resolve_raw_dir(args)
+    path = resolve_source_path(hit, raw_dir)
+    if path is None:
+        print(f"[X] 找不到第 {n} 条结果对应的源文件：{hit.location()}", file=stream)
+        print(f"    拼接规则是 <raw_dir>/<repo>/<rel_path>，当前 raw_dir = {raw_dir}",
+              file=stream)
+        if not raw_dir.exists():
+            print("    raw_dir 不存在：用 --raw-dir 指向语料仓库的上一级目录"
+                  "（含 JavaGuide、CS-Notes 等子目录的那一层）", file=stream)
+        return 1
+
+    ok, command = open_in_editor(path, hit.line_start or 1)
+    if ok:
+        print(f"[open] {command}", file=stream)
+        print(f"       文件：{path}", file=stream)
+    else:
+        print(f"[X] 打开失败：{command}", file=stream)
+    return 0 if ok else 1
 
 
 def _summarize(text: str, width: int = 160) -> str:
@@ -395,6 +471,143 @@ def cmd_ask(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_web(args: argparse.Namespace) -> int:
+    """启动本地 Web 界面（长驻服务）。
+
+    索引和模型**只在这里加载一次**：`Retriever` 构造完就交给 `create_app`，
+    之后每个 HTTP 请求复用同一个实例，单次检索只剩「编码 query + 矩阵乘 +
+    BM25」。启动时先跑一次预热检索，把模型首帧和分词器初始化的开销提前
+    付掉，第一个用户请求不用等 70 秒。
+
+    没有 API key 也能启动：`/api/search` 正常，`/api/ask` 返回 503。
+    """
+    import threading
+    import time
+    import webbrowser
+
+    try:
+        import uvicorn
+    except ImportError:
+        print("[X] 没有 uvicorn，Web 界面起不来（本机 pip 装不了包，"
+              "用已装好的那套环境跑）")
+        return 2
+
+    from .retrieve.embedder import HashingEmbedder
+    from .retrieve.pipeline import Retriever
+    from .web.app import create_app
+    from .web.editor import detect_editor
+
+    rc = _load_retrieval_config(args)
+    web_cfg = _load_ingest_config(args).web
+
+    index_dir = rc.index_dir
+    if not index_dir.exists():
+        print(f"[X] 索引目录不存在：{index_dir}")
+        print("    先建索引：python ingest.py index --chunks <chunks.jsonl>")
+        return 2
+    try:
+        index_info = json.loads(
+            (index_dir / "index_meta.json").read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        print(f"[X] {index_dir / 'index_meta.json'} 读不出来，索引可能不完整，请重建。")
+        return 2
+
+    host = (args.host or web_cfg.host or "127.0.0.1").strip()
+    port = int(args.port if args.port is not None else web_cfg.port)
+    raw_dir = _resolve_raw_dir(args)
+    editor = (args.editor or web_cfg.editor or "").strip() or detect_editor()
+
+    # 0.0.0.0 是监听地址，不是能点开的地址
+    display_host = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
+    url = f"http://{display_host}:{port}"
+
+    embedder = None
+    if "hashing" in str(index_info.get("embedder", "")).lower():
+        embedder = HashingEmbedder(dim=int(index_info.get("dim", 512)))
+
+    n_chunks = index_info.get("n_chunks")
+    print("=" * 68)
+    print("  Phase 5 · 本地 Web 界面")
+    print("=" * 68)
+    print(f"  地址     : {url}")
+    print(f"  索引     : {index_dir}"
+          + (f"  ({_fmt(int(n_chunks))} 块)" if n_chunks else ""))
+    print(f"  模型     : {rc.model_dir}")
+    print(f"  语料     : {raw_dir}"
+          + ("" if raw_dir.exists() else "   [!] 目录不存在，/api/open 会打不开文件"))
+    print(f"  编辑器   : {editor or '未找到（code / notepad 都不在 PATH 上）'}")
+    print("-" * 68)
+    print("  正在加载索引（一次性，之后每个请求复用）...")
+    sys.stdout.flush()
+
+    started = time.perf_counter()
+    try:
+        retriever = Retriever(index_dir, embedder=embedder,
+                              cfg=rc.to_retriever_cfg())
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        print(f"[X] {exc}")
+        return 2
+    load_sec = time.perf_counter() - started
+    print(f"  索引就绪 : {load_sec:.1f}s")
+
+    warmed = time.perf_counter()
+    try:
+        retriever.search("预热", top_k=1)
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        print(f"[X] 模型预热失败：{exc}")
+        if "模型目录不存在" in str(exc):
+            print("    用 --model-dir 指向 bge-m3 目录（例如 G:\\kb\\models\\bge-m3）。")
+        return 2
+    warm_sec = time.perf_counter() - warmed
+    print(f"  模型就绪 : {warm_sec:.1f}s（预热检索）")
+
+    answerer = None
+    llm = None
+    answer_state = "未启用（没有可用的模型客户端）"
+    try:
+        from .generate.llm import DeepSeekClient, KeyNotFoundError, LLMError
+        from .generate.pipeline import Answerer
+
+        gc = _load_generate_config(args)
+        llm = DeepSeekClient(
+            model=gc.model,
+            base_url=gc.base_url,
+            api_key_env=gc.api_key_env,
+            timeout=gc.timeout,
+        )
+        answerer = Answerer(retriever, llm, cfg=gc.to_answerer_cfg())
+        answer_state = f"已启用（{gc.model}）"
+    except KeyNotFoundError as exc:
+        # 没有 key 只影响问答，检索照常
+        answer_state = f"未启用（{exc}）"
+    except LLMError as exc:
+        answer_state = f"未启用（初始化失败：{exc}）"
+
+    print(f"  问答     : {answer_state}")
+    print("-" * 68)
+
+    app = create_app(retriever, answerer, raw_dir=raw_dir, editor=editor)
+    print(f"  打开 {url}    （Ctrl+C 停止服务）")
+    print("=" * 68)
+    # uvicorn 启动后 stdout 会被它接管（日志走自己的 handler），这里先冲干净：
+    # 不加的话输出被管道/重定向时是块缓冲，启动信息会一直卡在缓冲区里。
+    sys.stdout.flush()
+
+    if not args.no_browser:
+        # 等 uvicorn 把端口 bind 完再开浏览器，1 秒足够本地启动
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+
+    try:
+        uvicorn.run(app, host=host, port=port)
+    except KeyboardInterrupt:
+        print("\n[停止] 已退出")
+    finally:
+        if llm is not None:
+            llm.close()
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="kb",
@@ -438,6 +651,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_search.add_argument("--rerank", action="store_true", dest="use_rerank",
                           help="开启交叉编码重排")
     p_search.add_argument("--json", action="store_true", help="输出 JSON")
+    p_search.add_argument("--open", type=int, default=None, dest="open_index",
+                          metavar="N",
+                          help="打印结果后用编辑器打开第 N 条（从 1 开始）的源文件")
+    p_search.add_argument("--raw-dir", dest="raw_dir",
+                          help="语料根目录（默认取 [path].raw_dir），--open 用它拼路径")
     p_search.set_defaults(func=cmd_search)
 
     p_ask = sub.add_parser("ask", help="检索 + 大模型生成带引用的答案（Phase 4）")
@@ -461,6 +679,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_ask.add_argument("--show-hits", action="store_true", dest="show_hits",
                        help="额外打印检索原始结果")
     p_ask.set_defaults(func=cmd_ask)
+
+    p_web = sub.add_parser("web", help="启动本地 Web 界面（Phase 5，长驻服务）")
+    p_web.add_argument("--config", help="config.toml 路径（默认项目根目录下）")
+    p_web.add_argument("--host", help="监听地址（默认取 [web].host，127.0.0.1）")
+    p_web.add_argument("--port", type=int, help="端口（默认取 [web].port，8000）")
+    p_web.add_argument("--index-dir", dest="index_dir", help="索引目录")
+    p_web.add_argument("--model-dir", dest="model_dir", help="bge-m3 ONNX 目录")
+    p_web.add_argument("--raw-dir", dest="raw_dir",
+                       help="语料根目录（默认取 [path].raw_dir），/api/open 用它拼路径")
+    p_web.add_argument("--editor",
+                       help="编辑器命令名或可执行文件路径（默认取 [web].editor，留空自动探测）")
+    p_web.add_argument("--no-browser", action="store_true", dest="no_browser",
+                       help="启动后不自动打开浏览器")
+    p_web.set_defaults(func=cmd_web)
 
     return parser
 

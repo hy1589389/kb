@@ -84,3 +84,18 @@ top_k = 5              # 送进提示词的块数上限，可被 ask --top-k 覆
 min_top_score = 0
 
 timeout = 60           # 单次请求超时（秒）
+
+# ============================================================
+#  Phase 5 · Web 界面
+#  启  动：python ingest.py web
+#         python ingest.py web --port 8123 --no-browser
+#  编辑器：editor 留空 = 自动探测（先找 code，能跳到行；再退到 notepad）
+#          code 不在 PATH 上时，这里可以写 code.cmd 的绝对路径，
+#          或者启动时用 --editor "D:\...\bin\code.cmd"
+#  语料根目录不在这里配，统一用 [path].raw_dir；临时换目录用 --raw-dir
+# ============================================================
+
+[web]
+host = "127.0.0.1"
+port = 8000
+editor = ""            # 留空 = 自动探测 code -> notepad

@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>本地知识库</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --border: #e3e6ea;
+    --text: #1f2328;
+    --muted: #6b7280;
+    --accent: #2563eb;
+    --accent-weak: #eef3ff;
+    --ok: #067647;
+    --bad: #b42318;
+    --bad-bg: #fef3f2;
+    --flash: #fff6cc;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI",
+                 "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", Roboto, Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.65;
+  }
+  .wrap { width: 100%; max-width: 980px; margin: 0 auto; padding: 0 20px; }
+
+  /* ---------- 顶部 ---------- */
+  .topbar {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  .topbar .wrap {
+    display: flex; align-items: center; gap: 18px;
+    padding-top: 12px; padding-bottom: 12px; flex-wrap: wrap;
+  }
+  .brand { font-size: 15px; font-weight: 600; letter-spacing: .2px; }
+  .brand small { display: block; font-size: 11px; font-weight: 400; color: var(--muted); }
+  .searchbar { display: flex; align-items: center; gap: 8px; flex: 1 1 420px; }
+  #query-input {
+    flex: 1 1 auto; min-width: 160px;
+    height: 36px; padding: 0 12px;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: #fff; color: var(--text);
+    font: inherit;
+  }
+  #query-input:focus { outline: 2px solid var(--accent-weak); border-color: var(--accent); }
+
+  .modeswitch { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .mode {
+    height: 34px; padding: 0 12px;
+    border: 0; background: #fff; color: var(--muted);
+    font: inherit; cursor: pointer;
+  }
+  .mode + .mode { border-left: 1px solid var(--border); }
+  .mode.active { background: var(--accent-weak); color: var(--accent); font-weight: 600; }
+
+  button.primary {
+    height: 36px; padding: 0 18px;
+    border: 0; border-radius: 8px;
+    background: var(--accent); color: #fff;
+    font: inherit; font-weight: 500; cursor: pointer;
+  }
+  button.primary:disabled { opacity: .55; cursor: default; }
+
+  /* ---------- 主体 ---------- */
+  main { flex: 1 1 auto; padding: 24px 0 40px; }
+  .hidden { display: none !important; }
+
+  .empty {
+    padding: 56px 20px; text-align: center; color: var(--muted);
+    border: 1px dashed var(--border); border-radius: 10px; background: var(--panel);
+  }
+  .loading { padding: 40px 20px; text-align: center; color: var(--muted); }
+  .spinner {
+    display: inline-block; width: 14px; height: 14px; margin-right: 8px;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin .7s linear infinite; vertical-align: -2px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .error {
+    padding: 14px 16px; border-radius: 10px;
+    border: 1px solid #f3c4bd; background: var(--bad-bg); color: var(--bad);
+    white-space: pre-wrap;
+  }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin-bottom: 12px;
+  }
+  .card-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .rank {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 30px; height: 22px; padding: 0 7px;
+    border-radius: 11px; background: var(--accent-weak); color: var(--accent);
+    font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums;
+  }
+  .score { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .location {
+    margin-left: auto; color: var(--muted); font-size: 12px;
+    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    word-break: break-all;
+  }
+  .crumb { margin: 8px 0 6px; font-size: 15px; font-weight: 600; line-height: 1.45; }
+  .snippet {
+    margin: 0; color: #374151; white-space: pre-wrap; word-break: break-word;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4;
+    overflow: hidden;
+  }
+  .snippet.expanded { display: block; -webkit-line-clamp: unset; overflow: visible; }
+  .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .ghost {
+    height: 30px; padding: 0 12px;
+    border: 1px solid var(--border); border-radius: 7px;
+    background: #fff; color: var(--text); font: inherit; font-size: 13px; cursor: pointer;
+  }
+  .ghost:hover { border-color: var(--accent); color: var(--accent); }
+  .ghost:disabled { opacity: .55; cursor: default; }
+  .ghost.small { height: 26px; font-size: 12px; padding: 0 10px; margin-top: 6px; }
+  .meta { margin-top: 8px; font-size: 12px; color: var(--muted); }
+  .meta.bad { color: var(--bad); }
+
+  /* ---------- 问答 ---------- */
+  .answer-card.refused { border-color: #f3c4bd; background: var(--bad-bg); }
+  .answer-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+  .answer-title { font-size: 15px; font-weight: 600; }
+  .answer-card.refused .answer-title { color: var(--bad); }
+  .answer-meta { margin-left: auto; font-size: 12px; color: var(--muted); }
+  .refuse-reason { margin: 0 0 8px; color: var(--bad); font-weight: 600; }
+  .answer-body { white-space: pre-wrap; word-break: break-word; }
+  .ref-badge {
+    border: 1px solid #dbe4ff; border-radius: 4px; background: var(--accent-weak);
+    color: #1d4ed8; font: inherit; font-size: 11px; line-height: 1.4;
+    padding: 0 4px; margin: 0 1px; cursor: pointer; vertical-align: text-top;
+  }
+  .ref-badge:hover { background: #dfe8ff; }
+  .warning { margin-top: 10px; font-size: 12px; color: var(--bad); }
+
+  .citations { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 14px; }
+  .citations-title { margin: 0 0 10px; font-size: 13px; font-weight: 600; color: var(--muted); }
+  .citation-list { list-style: none; margin: 0; padding: 0; }
+  .citation {
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; margin-bottom: 8px; background: #fff;
+    transition: background-color .25s ease;
+  }
+  .citation.flash { background: var(--flash); }
+  .citation-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .ref-label { color: var(--accent); font-weight: 600; font-size: 12px; }
+  .citation-loc {
+    font-size: 12px; color: var(--muted); word-break: break-all;
+    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  }
+  .citation-crumb { margin-top: 4px; font-size: 13px; font-weight: 600; }
+  .citation-text { margin: 6px 0 0; font-size: 13px; color: #374151; white-space: pre-wrap; word-break: break-word; }
+
+  /* ---------- 底部状态条 ---------- */
+  #status-bar {
+    position: sticky; bottom: 0;
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 8px 20px;
+    background: var(--panel); border-top: 1px solid var(--border);
+    font-size: 12px; color: var(--muted);
+  }
+  .chip { white-space: nowrap; }
+  .chip.ok { color: var(--ok); }
+  .chip.bad { color: var(--bad); }
+
+  #toast {
+    position: fixed; right: 20px; bottom: 52px; z-index: 20;
+    max-width: min(560px, calc(100vw - 40px));
+    padding: 10px 14px; border-radius: 8px;
+    background: #1f2328; color: #fff; font-size: 13px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.16);
+    white-space: pre-wrap; word-break: break-all;
+  }
+  #toast.bad { background: var(--bad); }
+
+  @media (max-width: 620px) {
+    .location { margin-left: 0; width: 100%; }
+    .topbar .wrap { gap: 10px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wrap">
+    <div class="brand">本地知识库<small>BM25 + bge-m3 混合检索</small></div>
+    <div class="searchbar">
+      <input id="query-input" type="text" autocomplete="off" spellcheck="false"
+             placeholder="输入关键词…" aria-label="查询词">
+      <div class="modeswitch" role="tablist" aria-label="模式">
+        <button id="mode-search" class="mode active" type="button" data-mode="search">检索</button>
+        <button id="mode-ask" class="mode" type="button" data-mode="ask">问答</button>
+      </div>
+      <button id="search-btn" class="primary" type="button">搜索</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <section id="empty-state" class="empty">输入关键词后回车开始检索</section>
+    <section id="loading" class="loading hidden"><span class="spinner"></span>查询中…</section>
+    <section id="error-box" class="error hidden"></section>
+    <section id="results" class="results hidden"></section>
+    <section id="answer-panel" class="answer hidden"></section>
+  </div>
+</main>
+
+<footer id="status-bar"><span class="chip">健康检查中…</span></footer>
+<div id="toast" class="hidden"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  var state = {
+    mode: 'search',
+    busy: false,
+    health: null,
+    healthError: null,
+    lastElapsed: null,
+    lastServerMs: null
+  };
+
+  function $(id) { return document.getElementById(id); }
+
+  function el(tag, cls, text) {
+    var node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined && text !== null) node.textContent = text;
+    return node;
+  }
+
+  function fmtInt(n) {
+    if (typeof n !== 'number' || !isFinite(n)) return String(n);
+    return n.toLocaleString('en-US');
+  }
+
+  function fmtScore(v) {
+    return typeof v === 'number' ? 'score ' + v.toFixed(4) : 'score ' + String(v);
+  }
+
+  async function api(path, options) {
+    var res;
+    try {
+      res = await fetch(path, options);
+    } catch (err) {
+      throw new Error('连不上后端：' + (err && err.message ? err.message : err));
+    }
+    var data = null;
+    try { data = await res.json(); } catch (err) { data = null; }
+    if (!res.ok) {
+      var detail = data && (data.detail || data.error);
+      if (Array.isArray(detail)) detail = detail.map(function (d) { return d.msg || JSON.stringify(d); }).join('; ');
+      throw new Error(typeof detail === 'string' && detail ? detail : ('HTTP ' + res.status));
+    }
+    if (data === null) throw new Error('响应不是合法 JSON');
+    return data;
+  }
+
+  /* ---------------- 三种状态 ---------------- */
+  function setState(name, message) {
+    $('empty-state').classList.toggle('hidden', name !== 'empty');
+    $('loading').classList.toggle('hidden', name !== 'loading');
+    $('error-box').classList.toggle('hidden', name !== 'error');
+    if (name === 'empty') $('empty-state').textContent = message || '输入关键词后回车开始检索';
+    if (name === 'error') $('error-box').textContent = message || '出错了';
+  }
+
+  function hidePanels() {
+    $('results').classList.add('hidden');
+    $('answer-panel').classList.add('hidden');
+    $('results').replaceChildren();
+    $('answer-panel').replaceChildren();
+  }
+
+  /* ---------------- 提示条 ---------------- */
+  var toastTimer = null;
+  function toast(text, isError) {
+    var box = $('toast');
+    box.textContent = text;
+    box.classList.remove('hidden');
+    box.classList.toggle('bad', !!isError);
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { box.classList.add('hidden'); }, 4000);
+  }
+
+  /* ---------------- 检索 ---------------- */
+  function renderCard(item) {
+    var card = el('article', 'card');
+
+    var head = el('div', 'card-head');
+    head.appendChild(el('span', 'rank', '#' + item.rank));
+    head.appendChild(el('span', 'score', fmtScore(item.score)));
+    var loc = (item.repo ? item.repo + '/' : '') + item.rel_path;
+    if (item.line_start) loc += ':' + item.line_start + '-' + item.line_end;
+    head.appendChild(el('span', 'location', loc));
+    card.appendChild(head);
+
+    card.appendChild(el('h2', 'crumb', item.breadcrumb || '(无标题)'));
+
+    var body = el('div', 'snippet', item.text || '(空)');
+    card.appendChild(body);
+
+    var actions = el('div', 'actions');
+
+    var expanded = false;
+    var expandBtn = el('button', 'ghost', '展开全文');
+    expandBtn.type = 'button';
+    expandBtn.addEventListener('click', function () {
+      expanded = !expanded;
+      body.textContent = expanded ? (item.text_full || item.text || '') : (item.text || '');
+      body.classList.toggle('expanded', expanded);
+      expandBtn.textContent = expanded ? '收起' : '展开全文';
+    });
+    actions.appendChild(expandBtn);
+
+    var openBtn = el('button', 'ghost', '在 VS Code 打开');
+    openBtn.type = 'button';
+    openBtn.addEventListener('click', function () { openInEditor(item, openBtn); });
+    actions.appendChild(openBtn);
+
+    card.appendChild(actions);
+
+    if (item.text_chars) {
+      card.appendChild(el('div', 'meta', '全文 ' + fmtInt(item.text_chars) + ' 字符'));
+    }
+    if (!item.abs_path) {
+      card.appendChild(el('div', 'meta bad', '源文件未找到：检查启动时的 --raw-dir 是否指向语料仓库根目录'));
+    }
+    return card;
+  }
+
+  async function search(query) {
+    var data = await api('/api/search?q=' + encodeURIComponent(query) + '&top_k=10&mode=hybrid');
+    state.lastServerMs = typeof data.elapsed_ms === 'number' ? data.elapsed_ms : null;
+    if (!data.results || !data.results.length) {
+      hidePanels();
+      setState('empty', '没有命中：' + query);
+      return;
+    }
+    var box = $('results');
+    box.replaceChildren();
+    data.results.forEach(function (item) { box.appendChild(renderCard(item)); });
+    setState('none');
+    box.classList.remove('hidden');
+  }
+
+  async function openInEditor(item, btn) {
+    var label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '打开中…';
+    try {
+      var res = await api('/api/open?chunk_id=' + encodeURIComponent(item.chunk_id));
+      if (res.ok) toast('已打开：' + res.command, false);
+      else toast('打开失败：' + (res.error || res.command || '未知原因'), true);
+    } catch (err) {
+      toast('打开失败：' + err.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  }
+
+  /* ---------------- 问答 ---------------- */
+  function refBadge(n) {
+    var b = el('button', 'ref-badge', String(n));
+    b.type = 'button';
+    b.title = '跳转到引用 ' + n;
+    b.addEventListener('click', function () { jumpToCitation(n); });
+    return b;
+  }
+
+  function renderAnswerText(container, text, maxRef) {
+    var re = /\[(\d+)\]/g;
+    var last = 0;
+    var m;
+    while ((m = re.exec(text)) !== null) {
+      if (m.index > last) container.appendChild(document.createTextNode(text.slice(last, m.index)));
+      var n = parseInt(m[1], 10);
+      if (n >= 1 && n <= maxRef) container.appendChild(refBadge(n));
+      else container.appendChild(document.createTextNode(m[0]));
+      last = re.lastIndex;
+    }
+    container.appendChild(document.createTextNode(text.slice(last)));
+  }
+
+  function jumpToCitation(n) {
+    var target = document.getElementById('citation-' + n);
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    target.classList.remove('flash');
+    void target.offsetWidth;
+    target.classList.add('flash');
+    setTimeout(function () { target.classList.remove('flash'); }, 1800);
+  }
+
+  function renderCitations(list) {
+    var wrap = el('section', 'citations');
+    wrap.appendChild(el('h3', 'citations-title', '引用（' + list.length + ' 条）'));
+    var ol = el('ol', 'citation-list');
+    list.forEach(function (c) {
+      var li = el('li', 'citation');
+      li.id = 'citation-' + c.ref;
+
+      var head = el('div', 'citation-head');
+      head.appendChild(el('span', 'ref-label', '[' + c.ref + ']'));
+      var loc = (c.repo ? c.repo + '/' : '') + c.rel_path;
+      if (c.line_start) loc += ':' + c.line_start + '-' + c.line_end;
+      head.appendChild(el('span', 'citation-loc', loc));
+      li.appendChild(head);
+
+      if (c.breadcrumb) li.appendChild(el('div', 'citation-crumb', c.breadcrumb));
+      if (c.text) li.appendChild(el('p', 'citation-text', c.text));
+
+      var btn = el('button', 'ghost small', '在 VS Code 打开');
+      btn.type = 'button';
+      btn.addEventListener('click', function () {
+        openInEditor({ chunk_id: c.chunk_id }, btn);
+      });
+      li.appendChild(btn);
+      ol.appendChild(li);
+    });
+    wrap.appendChild(ol);
+    return wrap;
+  }
+
+  async function ask(query) {
+    var data = await api('/api/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: query, top_k: 5 })
+    });
+    state.lastServerMs = typeof data.elapsed_ms === 'number' ? data.elapsed_ms : null;
+
+    var panel = $('answer-panel');
+    panel.replaceChildren();
+
+    var card = el('article', 'card answer-card' + (data.refused ? ' refused' : ''));
+    var head = el('div', 'answer-head');
+    head.appendChild(el('span', 'answer-title', data.refused ? '拒答' : '答案'));
+    var meta = [data.model || '未知模型'];
+    if (typeof data.latency_ms === 'number') meta.push(data.latency_ms + ' ms');
+    if (typeof data.context_chunks === 'number') meta.push('上下文 ' + data.context_chunks + ' 块');
+    head.appendChild(el('span', 'answer-meta', meta.join(' · ')));
+    card.appendChild(head);
+
+    if (data.refused) {
+      card.appendChild(el('p', 'refuse-reason', '原因：' + (data.refuse_reason || '资料不足')));
+      card.appendChild(el('div', 'answer-body', data.text || ''));
+    } else {
+      var body = el('div', 'answer-body');
+      var citations = data.citations || [];
+      renderAnswerText(body, data.text || '', citations.length);
+      card.appendChild(body);
+      if (data.invalid_refs && data.invalid_refs.length) {
+        card.appendChild(el('div', 'warning',
+          '答案引用了不存在的编号：' + data.invalid_refs.map(function (n) { return '[' + n + ']'; }).join(' ')));
+      }
+      if (citations.length) card.appendChild(renderCitations(citations));
+    }
+
+    panel.appendChild(card);
+    setState('none');
+    panel.classList.remove('hidden');
+    if (data.refused) toast('资料不足，已拒答：' + (data.refuse_reason || ''), true);
+  }
+
+  /* ---------------- 底部状态 ---------------- */
+  function chip(text, tone) {
+    return el('span', 'chip' + (tone ? ' ' + tone : ''), text);
+  }
+
+  function renderStatus() {
+    var bar = $('status-bar');
+    bar.replaceChildren();
+    var h = state.health;
+    if (!h) {
+      bar.appendChild(chip(state.healthError ? '健康检查失败：' + state.healthError : '健康检查中…',
+        state.healthError ? 'bad' : ''));
+    } else {
+      bar.appendChild(chip('块数 ' + fmtInt(h.chunks)));
+      bar.appendChild(chip('embedder ' + (h.embedder || '未知')));
+      bar.appendChild(chip(h.ready ? '就绪' : '未就绪', h.ready ? 'ok' : 'bad'));
+      bar.appendChild(chip(h.answerer ? '问答已启用' : '问答未启用', h.answerer ? 'ok' : ''));
+      bar.appendChild(chip('编辑器 ' + (h.editor || '未探测')));
+    }
+    var text = '上次查询 -';
+    if (state.lastElapsed !== null) {
+      text = '上次查询 ' + state.lastElapsed + ' ms';
+      if (state.lastServerMs !== null) text += '（服务端 ' + state.lastServerMs + ' ms）';
+    }
+    bar.appendChild(chip(text));
+  }
+
+  async function loadHealth() {
+    try {
+      state.health = await api('/api/health');
+      state.healthError = null;
+    } catch (err) {
+      state.health = null;
+      state.healthError = err.message;
+    }
+    renderStatus();
+  }
+
+  /* ---------------- 主流程 ---------------- */
+  async function run() {
+    if (state.busy) return;
+    var query = $('query-input').value.trim();
+    if (!query) {
+      hidePanels();
+      setState('error', '请输入查询词');
+      $('query-input').focus();
+      return;
+    }
+
+    state.busy = true;
+    state.lastElapsed = null;
+    state.lastServerMs = null;
+    $('search-btn').disabled = true;
+    $('search-btn').textContent = '查询中…';
+    hidePanels();
+    setState('loading');
+
+    var started = performance.now();
+    try {
+      if (state.mode === 'ask') await ask(query);
+      else await search(query);
+    } catch (err) {
+      setState('error', (err && err.message) ? err.message : String(err));
+    } finally {
+      state.lastElapsed = Math.round(performance.now() - started);
+      state.busy = false;
+      $('search-btn').disabled = false;
+      $('search-btn').textContent = '搜索';
+      renderStatus();
+    }
+  }
+
+  function setMode(mode) {
+    state.mode = mode;
+    $('mode-search').classList.toggle('active', mode === 'search');
+    $('mode-ask').classList.toggle('active', mode === 'ask');
+    $('query-input').placeholder = mode === 'search'
+      ? '输入关键词…'
+      : '输入问题，例如：RAG 是什么';
+    hidePanels();
+    setState('empty', mode === 'search'
+      ? '输入关键词后回车开始检索'
+      : '输入问题后回车，答案会带引用');
+    $('query-input').focus();
+  }
+
+  /* ---------------- 绑定 ---------------- */
+  $('mode-search').addEventListener('click', function () { setMode('search'); });
+  $('mode-ask').addEventListener('click', function () { setMode('ask'); });
+  $('search-btn').addEventListener('click', run);
+  $('query-input').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      run();
+    }
+  });
+
+  loadHealth();
+  $('query-input').focus();
+})();
+</script>
+</body>
+</html>

@@ -4,6 +4,7 @@
 再用「BM25 + 稠密向量」的混合检索找出来，答案带引用来源。
 
 目前完成到生成：检索 → 大模型 → 带引用的答案。拒答和引用校验在后置步骤里做。
+另有一个本地 Web 界面，可以在浏览器里检索和问答，并把结果直接跳回编辑器。
 
 ## 目录结构
 
@@ -31,12 +32,16 @@ kb/
 │   │   ├── embedder.py      # ONNX 嵌入 / 重排
 │   │   └── pipeline.py
 │   ├── eval/                # 第三层：评测指标与运行器
-│   └── generate/            # 第四层：生成与引用校验
-│       ├── prompt.py        # 提示词与上下文截断
-│       ├── llm.py           # DeepSeek 客户端 + 密钥读取
-│       ├── cite.py          # [n] 校验与切句
-│       ├── pipeline.py      # Answerer / 两层拒答
-│       └── types.py         # Citation / Answer
+│   ├── generate/            # 第四层：生成与引用校验
+│   │   ├── prompt.py        # 提示词与上下文截断
+│   │   ├── llm.py           # DeepSeek 客户端 + 密钥读取
+│   │   ├── cite.py          # [n] 校验与切句
+│   │   ├── pipeline.py      # Answerer / 两层拒答
+│   │   └── types.py         # Citation / Answer
+│   └── web/                 # 第五层：Web 界面与编辑器回链
+│       ├── app.py           # create_app() + 5 个路由
+│       ├── editor.py        # 源文件解析 + code / notepad
+│       └── static/index.html  # 单文件前端，无 CDN
 ├── eval/
 │   ├── questions.jsonl      # 评测集
 │   └── run_eval.py
@@ -55,6 +60,7 @@ Python 3.11 以上（用到 `tomllib`）。
 **入库（第一层）零依赖**，标准库就够跑。
 检索（第二层）需要 `onnxruntime` 和 `tokenizers` —— 本机 pip 装不上，见
 [docs/phase2-notes.md](docs/phase2-notes.md) 里的手动安装步骤（两个 wheel 合计约 27 MB）。
+Web 层（第五层）需要 `fastapi` 和 `uvicorn`，本机已有（fastapi 0.139.2 / uvicorn 0.51.0）。
 
 不需要 torch，不需要 CUDA。
 
@@ -131,7 +137,100 @@ python ingest.py ask "LoRA 微调怎么配" --no-rerank --show-hits
 资料不足时拒答，正文是「知识库中没有找到足够的信息来回答这个问题。」，
 `refused=true`，`refuse_reason` 写明是「检索无结果」还是「资料不足」。
 
-### 6. 评测
+### 6. 在编辑器里打开结果
+
+`search --open N` 在打印完结果后，把第 N 条（从 1 开始）对应的源文件在编辑器里打开，
+并用 `code -g "<绝对路径>:<行号>"` 跳到 `line_start`：
+
+```powershell
+python ingest.py search "RAG 是什么" --open 1
+```
+
+```
+查询: RAG 是什么
+索引: G:\kb\data\index   返回 3 条   模式: hybrid
+====================================================================
+[ 1]   0.0311  RAG 基础
+     JavaGuide/docs/ai/interview-questions/rag-interview-questions.md:18-36
+     相关内容：[《RAG 基础概念：检索、生成与工程取舍》]...
+--------------------------------------------------------------------
+提示：用 --open N 打开第 N 条结果的源文件（N 从 1 开始，例如 --open 1）
+[open] D:\A\Microsoft VS Code\bin\code.CMD -g G:\kb\data\raw\JavaGuide\docs\ai\interview-questions\rag-interview-questions.md:18
+       文件：G:\kb\data\raw\JavaGuide\docs\ai\interview-questions\rag-interview-questions.md
+```
+
+源文件路径按 `<raw_dir>/<repo>/<rel_path>` 拼，`raw_dir` 默认取 `[path].raw_dir`。
+语料不在项目目录下时用 `--raw-dir`：
+
+```powershell
+python ingest.py search "RAG 是什么" --raw-dir G:\kb\data\raw --open 1
+```
+
+编辑器按 `code` → `notepad` 的顺序探测。`code` 能跳行；`notepad` 没有跳行参数，
+只打开文件，输出里会注明「不支持跳行」。可以用 `[web].editor` 或 `--editor` 固定。
+
+N 越界、源文件不存在、编辑器都不可用时只打印 `[X] ...` 并返回 1，不抛栈。
+`--open` 和 `--json` 一起用时，打开说明写 stderr，stdout 的 JSON 不受影响。
+
+### 7. 本地 Web 界面
+
+```powershell
+python ingest.py web                 # http://127.0.0.1:8000，自动开浏览器
+python ingest.py web --port 8123
+python ingest.py web --no-browser
+```
+
+索引和模型不在项目目录下时（比如用 `G:\kb` 那一套）：
+
+```powershell
+python ingest.py web --index-dir G:\kb\data\index --model-dir G:\kb\models\bge-m3 --raw-dir G:\kb\data\raw --no-browser
+```
+
+启动日志：
+
+```
+====================================================================
+  Phase 5 · 本地 Web 界面
+====================================================================
+  地址     : http://127.0.0.1:8123
+  索引     : G:\kb\data\index  (18,276 块)
+  模型     : G:\kb\models\bge-m3
+  语料     : G:\kb\data\raw
+  编辑器   : code
+--------------------------------------------------------------------
+  正在加载索引（一次性，之后每个请求复用）...
+  索引就绪 : 0.4s
+  模型就绪 : 2.7s（预热检索）
+  问答     : 已启用（deepseek-chat）
+--------------------------------------------------------------------
+  打开 http://127.0.0.1:8123    （Ctrl+C 停止服务）
+====================================================================
+```
+
+服务是长驻的，Ctrl+C 退出。索引和模型各加载一次（`Retriever` 构造 + 一次预热检索），
+之后每个请求复用同一个实例；18,276 块的索引上单次混合检索约 50 ms。
+没有 API key 也能启动，只是 `/api/ask` 返回 503，检索和 `--open` 照常。
+
+界面：顶部输入框 + 检索 / 问答切换；检索结果是卡片，显示排名、分数、标题路径、
+`repo/rel_path:行号`、4 行摘要，两个按钮「展开全文」「在 VS Code 打开」；问答显示
+答案和引用，正文里的 `[1]` 是可点的角标，点了滚到对应引用并高亮；拒答单独配色并
+显示原因；底部状态条是块数、embedder、是否就绪和上次查询耗时。
+
+路由：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/` | 返回 `static/index.html` |
+| GET | `/api/search?q=&top_k=10&mode=hybrid` | 结果列表，`mode` 可选 `hybrid` / `dense` / `sparse` |
+| POST | `/api/ask` | body `{"q": "...", "top_k": 5}`，返回 `Answer.to_dict()` |
+| GET | `/api/open?chunk_id=...` | 在编辑器打开该块的源文件；未知 id 返回 404 |
+| GET | `/api/health` | 就绪状态、块数、embedder、模型目录、编辑器 |
+
+Python 侧入口是 `kb.web.app.create_app(retriever, answerer=None, *, raw_dir, editor=None)`。
+`retriever` / `answerer` 由调用方构造好再传进去，`create_app` 自己不做任何加载 ——
+这就是「只加载一次」的实现方式。
+
+### 8. 评测
 
 ```powershell
 python eval\run_eval.py --index-dir data\index --top-k 10
@@ -139,13 +238,14 @@ python eval\run_eval.py --no-dense            # 只跑 BM25，用于对照
 python eval\run_eval.py --compare results\a.json results\b.json
 ```
 
-### 7. 测试
+### 9. 测试
 
 ```powershell
 python tests\test_chunker.py      # 切块器
 python tests\test_retrieve.py     # 检索层
 python tests\test_eval.py         # 评测逻辑
 python tests\test_generate.py     # 生成层（不联网）
+python tests\test_web.py          # Web 层与编辑器回链（不加载模型）
 python -m unittest discover -s tests
 ```
 
@@ -191,6 +291,17 @@ python -m unittest discover -s tests
 `min_top_score` 不能拿去卡混合检索：RRF 融合分只有名次含义（约 0.016~0.033），
 和余弦相似度不在一个量纲上。代码在 `source=hybrid` / `rerank` 时显式跳过它并打日志，
 否则会把所有查询都拒掉。
+
+Web 参数：
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `host` | `127.0.0.1` | 监听地址，`0.0.0.0` 表示局域网可访问 |
+| `port` | 8000 | 端口 |
+| `editor` | 空 | 空 = 自动探测 `code` → `notepad`；也可写命令名或 `code.cmd` 的绝对路径 |
+
+Web 没有单独的语料根目录配置，`/api/open` 和 `search --open` 都用 `[path].raw_dir`。
+两处配同一个目录迟早会不一致，临时换目录用 `--raw-dir`。
 
 命令行参数覆盖配置：
 
