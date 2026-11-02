@@ -21,6 +21,7 @@
   · /api/stats 按集合分组 —— 旧顶层字段必须还在（只增不减）
   · cmd_web 的索引发现     —— 没索引的集合跳过、全都没有才报错、--index-dir 退化成单集合
   · 前端集合 chip / 徽标   —— 没有构建工具，id、localStorage、请求参数只能静态检查
+  · /api/review/today      —— 题库只取失败题、按日期稳定轮换、gold 块可直接打开
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ import shutil
 import sys
 import unittest
 import uuid
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -51,6 +53,15 @@ from kb.retrieve.types import SearchHit  # noqa: E402
 from kb.web import app as web_app  # noqa: E402
 from kb.web.app import create_app  # noqa: E402
 from kb.web.editor import detect_editor, open_in_editor, resolve_source_path  # noqa: E402
+from kb.web.review import (  # noqa: E402
+    REVIEW_MAX_CHUNKS,
+    REVIEW_TOP_K,
+    REVIEW_TZ,
+    load_review_bank,
+    parse_review_day,
+    review_failures,
+    review_today,
+)
 from kb.cli import _load_ingest_config, _resolve_web_indexes, build_parser  # noqa: E402
 
 TMP_ROOT = ROOT / ".tmp"
@@ -101,6 +112,37 @@ def make_answer(hit: SearchHit, *, refused: bool = False,
         sentence_count=0 if refused else 1,
         context_chunks=0 if refused else 1,
     )
+
+
+def make_review_row(qid: str, rank, *, question: str = "题目内容",
+                    gold=None, category: str = "同义改写",
+                    difficulty: str = "medium") -> dict:
+    """一条 `per_query` 记录，字段与 `eval/runner.save` 落盘的一致。"""
+    return {
+        "qid": qid,
+        "question": question,
+        "difficulty": difficulty,
+        "category": category,
+        "gold": list(gold or []),
+        "predicted": [],
+        "rank": rank,
+        "rr": 0.0,
+        "error": "",
+    }
+
+
+def write_run_file(directory: Path, rows: list[dict], *,
+                   top_k: int = 10, name: str = "run_hybrid.json") -> Path:
+    """写一份评测结果文件（「今日复习」的题库）。"""
+    payload = {
+        "config": {"top_k": top_k, "n_questions": len(rows)},
+        "summary": {"n": len(rows), "recall": {"5": 0.85}},
+        "per_query": rows,
+    }
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / name
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return path
 
 
 class FakeRetriever:
@@ -1057,6 +1099,313 @@ class MultiCollectionTests(TempCorpus):
         self.assertNotIn('href="http', lowered)
         self.assertNotIn("<link", lowered)
 
+
+# ---------------------------------------------------------------- 今日复习
+
+
+class ReviewBankTests(unittest.TestCase):
+    """题库解析（`kb.web.review`）：纯函数，不碰 retriever，也不起 HTTP。"""
+
+    def setUp(self) -> None:
+        TMP_ROOT.mkdir(parents=True, exist_ok=True)
+        self.tmp = TMP_ROOT / f"review-{uuid.uuid4().hex[:8]}"
+        self.tmp.mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_keeps_only_failures(self) -> None:
+        """rank 5 算命中，6 / 10 / null 都算没命中。"""
+        run = {"per_query": [
+            make_review_row("q1", 1),
+            make_review_row("q5", 5),
+            make_review_row("q6", 6),
+            make_review_row("q10", 10),
+            make_review_row("qnull", None),
+        ]}
+        self.assertEqual([item["qid"] for item in review_failures(run)],
+                         ["q6", "q10", "qnull"])
+
+    def test_top_k_is_configurable(self) -> None:
+        run = {"per_query": [make_review_row("q1", 1), make_review_row("q4", 4)]}
+        self.assertEqual([item["qid"] for item in review_failures(run, top_k=3)],
+                         ["q4"])
+        self.assertEqual(review_failures(run, top_k=4), [])
+
+    def test_rank_as_string_and_garbage(self) -> None:
+        run = {"per_query": [
+            make_review_row("a", "7"),
+            make_review_row("b", "x"),
+            make_review_row("c", " 3 "),
+        ]}
+        self.assertEqual([item["qid"] for item in review_failures(run)], ["a", "b"])
+
+    def test_question_missing_is_skipped(self) -> None:
+        run = {"per_query": [
+            make_review_row("a", 9, question="   "),
+            make_review_row("b", 9),
+        ]}
+        self.assertEqual([item["qid"] for item in review_failures(run)], ["b"])
+
+    def test_gold_normalized_to_strings(self) -> None:
+        run = {"per_query": [make_review_row("a", 9, gold=["x", "", None, "y"])]}
+        self.assertEqual(review_failures(run)[0]["gold"], ["x", "y"])
+
+    def test_rank_field_is_int(self) -> None:
+        run = {"per_query": [make_review_row("a", "8")]}
+        self.assertEqual(review_failures(run)[0]["rank"], 8)
+
+    def test_broken_payloads_return_empty(self) -> None:
+        for run in (None, {}, {"per_query": None}, {"per_query": ["x", 3]},
+                    {"per_query": [{"qid": "a", "rank": 9}]}):
+            self.assertEqual(review_failures(run), [], f"payload={run!r}")
+
+    def test_load_reads_file_and_counts(self) -> None:
+        path = write_run_file(self.tmp / "results",
+                              [make_review_row("a", 9), make_review_row("b", 1)],
+                              top_k=10)
+        bank = load_review_bank(path)
+        self.assertEqual([item["qid"] for item in bank["items"]], ["a"])
+        self.assertEqual(bank["n_evaluated"], 2)
+        self.assertEqual(bank["eval_top_k"], 10)      # 评测取前 10
+        self.assertEqual(bank["top_k"], REVIEW_TOP_K)  # 复习按前 5 判
+        self.assertEqual(bank["source"], "results/run_hybrid.json")
+        self.assertEqual(bank["reason"], "")
+
+    def test_load_missing_file_has_reason(self) -> None:
+        bank = load_review_bank(self.tmp / "nope.json")
+        self.assertEqual(bank["items"], [])
+        self.assertIn("读不出来", bank["reason"])
+        self.assertEqual(bank["n_evaluated"], 0)
+
+    def test_load_without_path_has_reason(self) -> None:
+        self.assertIn("没有配置", load_review_bank(None)["reason"])
+
+    def test_load_bad_json_has_reason(self) -> None:
+        path = self.tmp / "broken.json"
+        path.write_text("{not json", encoding="utf-8")
+        self.assertIn("不是合法 JSON", load_review_bank(path)["reason"])
+
+    def test_load_non_eval_file_has_reason(self) -> None:
+        path = self.tmp / "other.json"
+        path.write_text(json.dumps({"per_query": []}), encoding="utf-8")
+        self.assertIn("缺 summary", load_review_bank(path)["reason"])
+
+    def test_load_all_pass_has_reason(self) -> None:
+        path = write_run_file(self.tmp / "results", [make_review_row("a", 1)])
+        bank = load_review_bank(path)
+        self.assertEqual(bank["items"], [])
+        self.assertIn("没有失败题", bank["reason"])
+        self.assertIn("全部命中前 5", bank["reason"])
+
+    def test_parse_review_day(self) -> None:
+        today = date(2026, 11, 2)
+        self.assertEqual(parse_review_day("", today=today), today)
+        self.assertEqual(parse_review_day("   ", today=today), today)
+        self.assertEqual(parse_review_day(None, today=today), today)
+        self.assertEqual(parse_review_day("2026-10-01", today=today),
+                         date(2026, 10, 1))
+        for bad in ("2026/10/01", "20261001", "2026-13-01", "yesterday"):
+            with self.assertRaises(ValueError):
+                parse_review_day(bad, today=today)
+
+    def test_review_today_is_utc_plus_8(self) -> None:
+        """「今天」按东八区算：UTC 16:00 已经是次日。"""
+        self.assertEqual(REVIEW_TZ.utcoffset(None), timedelta(hours=8))
+        cases = {
+            datetime(2026, 11, 1, 15, 59, tzinfo=timezone.utc): date(2026, 11, 1),
+            datetime(2026, 11, 1, 16, 0, tzinfo=timezone.utc): date(2026, 11, 2),
+            datetime(2026, 11, 2, 15, 59, tzinfo=timezone.utc): date(2026, 11, 2),
+            datetime(2026, 11, 2, 16, 0, tzinfo=timezone.utc): date(2026, 11, 3),
+        }
+        for moment, expected in cases.items():
+            self.assertEqual(review_today(moment), expected, f"UTC {moment}")
+
+    def test_review_today_treats_naive_as_utc(self) -> None:
+        naive = datetime(2026, 11, 1, 16, 30)
+        self.assertEqual(review_today(naive), date(2026, 11, 2))
+
+
+class ReviewApiTests(TempCorpus):
+    """/api/review/today：题目按日期选、参考块优先取 gold。"""
+
+    DAY = date(2026, 11, 2)
+
+    def setUp(self) -> None:
+        super().setUp()
+        # chunk-2 的正文故意超过 400 字，用来验证复习卡片也带 text_full
+        self.hits = [
+            make_hit(1),
+            make_hit(2, line_start=40, line_end=80, text="红黑树 " * 120),
+            make_hit(3, repo="CS-Notes", rel_path="notes/rag.md",
+                     line_start=1, line_end=20),
+        ]
+        (self.raw / "CS-Notes" / "notes").mkdir(parents=True)
+        (self.raw / "CS-Notes" / "notes" / "rag.md").write_text(
+            "# RAG\n", encoding="utf-8")
+
+    def fail_rows(self) -> list[dict]:
+        """两道失败题 + 一道命中，题库大小是 2。"""
+        return [
+            make_review_row("q-a", 6, question="A 题：背包为什么不能贪心？",
+                            gold=["chunk-1"], category="同义改写"),
+            make_review_row("q-b", None, question="B 题：CAS 有几个操作数？",
+                            gold=["chunk-2"], category="中英混杂",
+                            difficulty="hard"),
+            make_review_row("q-pass", 1, question="C 题：HashMap 转红黑树",
+                            gold=["chunk-3"]),
+        ]
+
+    def build_app(self, rows: list[dict] | None = None, *,
+                  review_file="auto"):
+        if review_file == "auto":
+            review_file = write_run_file(self.tmp / "results",
+                                         self.fail_rows() if rows is None else rows)
+        self.retriever = FakeRetriever(self.hits)
+        return create_app(self.retriever, None, raw_dir=self.raw, editor="code",
+                          review_file=review_file)
+
+    def review(self, app, day: date | None = None) -> dict:
+        params = {} if day is None else {"day": day.isoformat()}
+        with TestClient(app) as client:
+            res = client.get("/api/review/today", params=params)
+        self.assertEqual(res.status_code, 200)
+        return res.json()
+
+    # ---- 选题目 ----
+
+    def test_returns_question_and_metadata(self) -> None:
+        body = self.review(self.build_app(), self.DAY)
+        self.assertTrue(body["available"])
+        self.assertEqual(body["date"], "2026-11-02")
+        self.assertEqual(body["total"], 2)          # 只有两条失败题
+        self.assertEqual(body["n_evaluated"], 3)
+        self.assertEqual(body["top_k"], REVIEW_TOP_K)
+        self.assertEqual(body["eval_top_k"], 10)
+        self.assertIn(body["qid"], {"q-a", "q-b"})
+        self.assertTrue(body["question"].strip())
+        self.assertEqual(body["seq"], self.DAY.toordinal() % 2 + 1)
+        self.assertEqual(body["source"], "results/run_hybrid.json")
+
+    def test_same_day_stable_next_day_rotates(self) -> None:
+        app = self.build_app()
+        first = self.review(app, self.DAY)
+        self.assertEqual(first["qid"], self.review(app, self.DAY)["qid"])
+        second = self.review(app, self.DAY + timedelta(days=1))
+        self.assertNotEqual(first["qid"], second["qid"])
+        # 题库只有 2 道，第三天轮回头一道
+        third = self.review(app, self.DAY + timedelta(days=2))
+        self.assertEqual(third["qid"], first["qid"])
+
+    def test_default_day_is_today_in_utc_plus_8(self) -> None:
+        body = self.review(self.build_app())
+        self.assertEqual(body["date"], review_today().isoformat())
+
+    def test_bad_day_is_400(self) -> None:
+        app = self.build_app()
+        with TestClient(app) as client:
+            res = client.get("/api/review/today", params={"day": "2026/11/02"})
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("YYYY-MM-DD", res.json()["detail"])
+
+    def test_route_rejects_post(self) -> None:
+        app = self.build_app()
+        with TestClient(app) as client:
+            self.assertEqual(client.post("/api/review/today").status_code, 405)
+
+    # ---- 参考原文 ----
+
+    def test_gold_chunks_come_from_meta_without_searching(self) -> None:
+        app = self.build_app()
+        body = self.review(app, self.DAY)
+        self.assertEqual(body["chunks_source"], "gold")
+        self.assertEqual(self.retriever.calls, [],
+                         "gold 块已经在 retriever.meta 里，不该再检索一次")
+        chunk = body["chunks"][0]
+        self.assertIn(chunk["chunk_id"], {"chunk-1", "chunk-2"})
+        self.assertTrue(chunk["text"])
+        self.assertTrue(chunk["abs_path"])
+        self.assertTrue(Path(chunk["abs_path"]).is_file())
+        for key in ("chunk_id", "rank", "breadcrumb", "repo", "rel_path",
+                    "line_start", "line_end", "text", "abs_path"):
+            self.assertIn(key, chunk)
+
+    def test_gold_chunk_is_openable_after_review(self) -> None:
+        """/api/review/today 取过的块，/api/open 要能直接打开。"""
+        app = self.build_app()
+        body = self.review(app, self.DAY)
+        cid = body["chunks"][0]["chunk_id"]
+        with TestClient(app) as client, \
+                mock.patch.object(web_app, "open_in_editor",
+                                  return_value=(True, "ok")) as opened:
+            res = client.get("/api/open", params={"chunk_id": cid})
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.json()["ok"])
+        self.assertEqual(opened.call_count, 1)
+
+    def test_long_gold_chunk_keeps_full_text(self) -> None:
+        """轮到 q-b 的那天，chunk-2 的长正文要有 text_full。"""
+        rows = [make_review_row("q-b", None, question="长正文",
+                                gold=["chunk-2"])]
+        app = self.build_app(rows)
+        body = self.review(app, self.DAY)
+        chunk = body["chunks"][0]
+        self.assertEqual(chunk["chunk_id"], "chunk-2")
+        self.assertTrue(chunk["truncated"])
+        self.assertIsNotNone(chunk["text_full"])
+        self.assertGreater(len(chunk["text"]), 0)
+
+    def test_chunks_are_capped(self) -> None:
+        rows = [make_review_row("q-many", 6, question="多段参考",
+                                gold=["chunk-1", "chunk-2", "chunk-3", "chunk-1"])]
+        body = self.review(self.build_app(rows), self.DAY)
+        self.assertEqual(len(body["chunks"]), REVIEW_MAX_CHUNKS)
+
+    def test_falls_back_to_search_when_gold_ids_are_stale(self) -> None:
+        """索引重建后 chunk_id 变了：退回检索，并如实标注来源。"""
+        rows = [make_review_row("q-x", 6, question="gold 对不上",
+                                gold=["chunk-gone"])]
+        app = self.build_app(rows)
+        body = self.review(app, self.DAY)
+        self.assertEqual(body["chunks_source"], "search")
+        self.assertEqual(len(body["chunks"]), len(self.hits))
+        self.assertEqual(self.retriever.calls[0]["query"], "gold 对不上")
+        self.assertEqual(self.retriever.calls[0]["top_k"], REVIEW_MAX_CHUNKS)
+
+    # ---- 题库不可用 ----
+
+    def test_unavailable_without_review_file(self) -> None:
+        body = self.review(self.build_app(review_file=None), self.DAY)
+        self.assertFalse(body["available"])
+        self.assertEqual(body["total"], 0)
+        self.assertEqual(body["chunks"], [])
+        self.assertIn("没有配置", body["reason"])
+
+    def test_unavailable_when_file_missing(self) -> None:
+        body = self.review(self.build_app(review_file=self.tmp / "nope.json"),
+                           self.DAY)
+        self.assertFalse(body["available"])
+        self.assertIn("读不出来", body["reason"])
+
+    def test_unavailable_when_nothing_failed(self) -> None:
+        rows = [make_review_row("q-pass", 1)]
+        body = self.review(self.build_app(rows), self.DAY)
+        self.assertFalse(body["available"])
+        self.assertIn("没有失败题", body["reason"])
+
+    # ---- 性能前提 ----
+
+    def test_bank_read_once_at_create_app(self) -> None:
+        with mock.patch.object(web_app, "load_review_bank",
+                               wraps=web_app.load_review_bank) as loader:
+            app = self.build_app()
+            with TestClient(app) as client:
+                for _ in range(3):
+                    client.get("/api/review/today")
+        self.assertEqual(loader.call_count, 1,
+                         "题库被重复读盘了，必须缓存在 app.state.review")
+
+
 # ---------------------------------------------------------------- /api/stats
 
 
@@ -1355,6 +1704,9 @@ class FrontendHtmlTests(unittest.TestCase):
             "retry-btn", "error-text", "status-chips",
             # 状态容器
             "loading", "empty-state", "toast",
+            # 今日复习
+            "review-btn", "review-panel", "review-title", "review-meta",
+            "review-close", "review-body",
         }
         self.assertEqual(sorted(expected - self.ids), [],
                          "index.html 缺少新增元素 id")
@@ -1373,9 +1725,34 @@ class FrontendHtmlTests(unittest.TestCase):
         exercised = {"query-input", "history-panel", "filter-chips",
                      "theme-toggle", "stats-panel", "retry-btn",
                      "collection-chips", "collection-filters",
-                     "collection-badge-tpl"}
+                     "collection-badge-tpl", "review-panel", "review-body"}
         self.assertEqual(sorted(exercised - used), [])
         self.assertEqual(sorted(used - self.ids - {"citation-"}), [])
+
+    def test_review_entry_contract(self) -> None:
+        """今日复习：入口、请求、先答后看、Esc 关闭，缺一条就是坏功能。"""
+        self.assertIn("今日复习", self.html)
+        self.assertIn("/api/review/today", self.script)
+        for needle in ("function openReview", "function closeReview",
+                       "function isReviewOpen", "function renderReview",
+                       "function renderReviewReveal", "function reviewAsk",
+                       "function shiftDay", "function reviewRankText"):
+            self.assertIn(needle, self.script)
+        # 「先自己答，再看参考」：草稿框 + 揭示按钮
+        self.assertIn("'写下你的答案", self.script)
+        self.assertIn("'我答完了，看参考'", self.script)
+        # 换一题 = 下一天那道（后端按日期取模）
+        self.assertIn("openReview(shiftDay(data.date, 1))", self.script)
+        # 参考答案复用 /api/ask，并复用答案渲染（[n] 角标关掉）
+        self.assertIn("renderAnswerText(wrap, result.text || '', 0)", self.script)
+        self.assertIn("'生成参考答案'", self.script)
+        # Esc 先关复习，再关统计
+        self.assertIn("if (isReviewOpen()) { closeReview(); return; }",
+                      self.script)
+        # 复习卡片的正文一律 textContent（不能为了排版引入第三处 innerHTML）
+        self.assertIn("el('p', 'review-your-answer', mine)", self.script)
+        self.assertIn("el('div', 'review-chunk-text', item.text || '(空)')",
+                      self.script)
 
     def test_no_external_resources(self) -> None:
         lowered = self.html.lower()

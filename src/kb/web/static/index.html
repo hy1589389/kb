@@ -447,6 +447,62 @@
   .stats-table .num { text-align: right; font-variant-numeric: tabular-nums; }
   .stats-loading { margin: 0; color: var(--muted); }
 
+  /* ---------- 今日复习 ---------- */
+  .overlay-card.wide { width: min(760px, 100%); }
+  .review-meta { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .review-body { display: flex; flex-direction: column; gap: 12px; }
+  .review-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .review-tag {
+    display: inline-flex; align-items: center;
+    height: 24px; padding: 0 9px;
+    border: 1px solid var(--border); border-radius: 12px;
+    background: var(--accent-weak); color: var(--accent); font-size: 12px;
+  }
+  .review-tag.plain { background: none; color: var(--muted); }
+  .review-question { margin: 0; font-size: 17px; font-weight: 600; line-height: 1.5; }
+  .review-hint { margin: 0; font-size: 12px; color: var(--muted); }
+  textarea.review-answer {
+    width: 100%; min-height: 96px; padding: 10px 12px; resize: vertical;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--input-bg); color: var(--text); font: inherit;
+  }
+  textarea.review-answer:focus {
+    outline: 2px solid var(--accent-weak); border-color: var(--accent);
+  }
+  .review-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .review-section { border-top: 1px solid var(--border); padding-top: 12px; }
+  .review-section-title {
+    margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--muted);
+  }
+  .review-your-answer {
+    margin: 0; padding: 10px 12px;
+    border-left: 3px solid var(--border-strong); border-radius: 4px;
+    background: var(--bg); white-space: pre-wrap; word-break: break-word;
+  }
+  .review-chunk {
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; background: var(--panel);
+  }
+  .review-chunk + .review-chunk { margin-top: 8px; }
+  .review-chunk-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .review-chunk-loc {
+    font-size: 12px; color: var(--muted); word-break: break-all;
+    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  }
+  .review-chunk-crumb { margin: 4px 0 0; font-size: 13px; font-weight: 600; }
+  .review-chunk-text {
+    margin: 6px 0 0; font-size: 13px; color: var(--snippet);
+    white-space: pre-wrap; word-break: break-word;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6;
+    overflow: hidden;
+  }
+  .review-chunk-text.expanded {
+    display: block; -webkit-line-clamp: unset; overflow: visible;
+  }
+  .review-chunk-actions { margin-top: 8px; }
+  .review-citations { margin-top: 10px; font-size: 12px; color: var(--muted); }
+  .review-cite { word-break: break-all; }
+
   #toast {
     position: fixed; right: 20px; bottom: 52px; z-index: 60;
     max-width: min(560px, calc(100vw - 40px));
@@ -537,9 +593,23 @@
 
 <footer id="status-bar">
   <div id="status-chips" class="status-chips"><span class="chip">健康检查中…</span></div>
+  <button id="review-btn" class="ghost small" type="button"
+          aria-haspopup="dialog" title="按日期复习一道评测里没检索到的题">今日复习</button>
   <button id="stats-btn" class="ghost small" type="button"
           aria-haspopup="dialog">统计</button>
 </footer>
+
+<div id="review-panel" class="overlay hidden" role="dialog" aria-modal="true"
+     aria-labelledby="review-title">
+  <div class="overlay-card wide">
+    <div class="overlay-head">
+      <h2 id="review-title">今日复习</h2>
+      <span id="review-meta" class="review-meta"></span>
+      <button id="review-close" class="ghost small" type="button">关闭</button>
+    </div>
+    <div id="review-body" class="review-body"></div>
+  </div>
+</div>
 
 <div id="stats-panel" class="overlay hidden" role="dialog" aria-modal="true"
      aria-labelledby="stats-title">
@@ -604,7 +674,9 @@
     selected: -1,            // 键盘选中的结果下标
     historyOpen: false,
     stats: null,             // /api/stats 响应缓存
-    statsLoading: false
+    statsLoading: false,
+    review: null,            // /api/review/today 响应缓存
+    reviewDraft: ''          // 本次会话里的答题草稿，刷新即丢
   };
 
   /* ================================================================
@@ -1829,6 +1901,7 @@
   function openStats() {
     var panel = $('stats-panel');
     if (!panel) return;
+    if (isReviewOpen()) closeReview();
     panel.classList.remove('hidden');
     document.body.classList.add('overlay-open');
 
@@ -1860,6 +1933,245 @@
   function closeStats() {
     hide('stats-panel');
     document.body.classList.remove('overlay-open');
+  }
+
+  /* ================================================================
+   *  今日复习
+   *
+   *  题目由后端按日期从「评测失败题」里挑（`/api/review/today`），前端只管
+   *  请求、渲染和「先自己答，再看参考」。草稿只放在 state 里：没有用户系统，
+   *  刷新就没了，比假装存过更诚实。
+   * ================================================================ */
+
+  function isReviewOpen() {
+    var panel = $('review-panel');
+    return !!panel && !panel.classList.contains('hidden');
+  }
+
+  function closeReview() {
+    hide('review-panel');
+    document.body.classList.remove('overlay-open');
+  }
+
+  /** `YYYY-MM-DD` 加天数。后端按日期取模选题目，「换一题」就是看下一天那道。 */
+  function shiftDay(iso, days) {
+    var parts = String(iso || '').split('-');
+    if (parts.length !== 3) return '';
+    var date = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    if (isNaN(date.getTime())) return '';
+    date.setDate(date.getDate() + days);
+    return date.getFullYear() + '-' + pad2(date.getMonth() + 1) + '-' + pad2(date.getDate());
+  }
+
+  function openReview(day) {
+    var panel = $('review-panel');
+    if (!panel) return;
+    if (isStatsOpen()) closeStats();
+    panel.classList.remove('hidden');
+    document.body.classList.add('overlay-open');
+    loadReview(day || '');
+  }
+
+  function loadReview(day) {
+    var body = $('review-body');
+    var meta = $('review-meta');
+    if (meta) meta.textContent = '';
+    if (body) {
+      body.replaceChildren();
+      body.appendChild(el('p', 'stats-loading', '题目加载中…'));
+    }
+    api('/api/review/today' + (day ? '?day=' + encodeURIComponent(day) : ''))
+      .then(function (data) {
+        state.review = data;
+        if (isReviewOpen()) renderReview(data);
+      })
+      .catch(function (err) {
+        if (!body) return;
+        body.replaceChildren();
+        body.appendChild(el('p', 'meta bad',
+          '复习题加载失败：' + (err && err.message ? err.message : err)));
+      });
+  }
+
+  function reviewRankText(data) {
+    if (typeof data.rank === 'number' && data.rank > 0) {
+      return '评测第 ' + data.rank + ' 位（前 ' + data.top_k + ' 没命中）';
+    }
+    return '评测没进前 ' + (data.eval_top_k || data.top_k || 10);
+  }
+
+  function renderReview(data) {
+    var body = $('review-body');
+    var meta = $('review-meta');
+    if (!body) return;
+    body.replaceChildren();
+
+    var total = Number(data.total) || 0;
+    var seq = Number(data.seq) || 0;
+    if (meta) {
+      meta.textContent = (data.date || '') +
+        (data.available && total ? ' · 第 ' + seq + '/' + total + ' 题' : '');
+    }
+
+    if (!data.available) {
+      body.appendChild(el('p', 'review-question', '今天没有可复习的题目'));
+      body.appendChild(el('p', 'review-hint', data.reason || '题库为空'));
+      if (data.source) body.appendChild(el('p', 'review-hint', '题库文件：' + data.source));
+      body.appendChild(el('p', 'review-hint',
+        '生成题库：python eval\\run_eval.py --top-k 10 --out results\\run_hybrid.json'));
+      return;
+    }
+
+    var tags = el('div', 'review-tags');
+    if (data.category) tags.appendChild(el('span', 'review-tag', data.category));
+    if (data.difficulty) tags.appendChild(el('span', 'review-tag', '难度 ' + data.difficulty));
+    tags.appendChild(el('span', 'review-tag', reviewRankText(data)));
+    if (data.qid) tags.appendChild(el('span', 'review-tag plain', data.qid));
+    body.appendChild(tags);
+
+    body.appendChild(el('h3', 'review-question', data.question));
+    body.appendChild(el('p', 'review-hint',
+      '题库是 ' + data.n_evaluated + ' 条评测里没进前 ' + data.top_k + ' 的 ' + total +
+      ' 条。先自己答一遍，再看参考原文。'));
+
+    var draft = el('textarea', 'review-answer');
+    draft.rows = 4;
+    draft.placeholder = '写下你的答案…（只在当前页面，不保存也不上传）';
+    draft.value = state.reviewDraft || '';
+    draft.addEventListener('input', function () { state.reviewDraft = draft.value; });
+    body.appendChild(draft);
+
+    var actions = el('div', 'review-actions');
+    var reveal = el('button', 'primary', '我答完了，看参考');
+    reveal.type = 'button';
+    reveal.addEventListener('click', function () {
+      var mine = draft.value;
+      draft.remove();
+      actions.remove();
+      renderReviewReveal(data, mine, body);
+    });
+    actions.appendChild(reveal);
+
+    var next = el('button', 'ghost', '换一题');
+    next.type = 'button';
+    next.title = '按日期轮换：看下一天轮到的那道';
+    next.addEventListener('click', function () {
+      state.reviewDraft = '';
+      openReview(shiftDay(data.date, 1));
+    });
+    actions.appendChild(next);
+    body.appendChild(actions);
+  }
+
+  function reviewChunkCard(item, index) {
+    var card = el('article', 'review-chunk');
+    var head = el('div', 'review-chunk-head');
+    head.appendChild(el('span', 'rank', '#' + index));
+    head.appendChild(el('span', 'review-chunk-loc', locationOf(item)));
+    card.appendChild(head);
+
+    if (item.breadcrumb) card.appendChild(el('p', 'review-chunk-crumb', item.breadcrumb));
+
+    var text = el('div', 'review-chunk-text', item.text || '(空)');
+    card.appendChild(text);
+
+    var actions = el('div', 'review-chunk-actions');
+    if (item.truncated) {
+      var expanded = false;
+      var toggle = el('button', 'ghost small', '展开全文');
+      toggle.type = 'button';
+      toggle.addEventListener('click', function () {
+        expanded = !expanded;
+        text.textContent = expanded ? (item.text_full || item.text || '') : (item.text || '');
+        text.classList.toggle('expanded', expanded);
+        toggle.textContent = expanded ? '收起' : '展开全文';
+      });
+      actions.appendChild(toggle);
+    }
+    var open = el('button', 'ghost small', '在 VS Code 打开');
+    open.type = 'button';
+    open.addEventListener('click', function () { openInEditor(item, open); });
+    actions.appendChild(open);
+    card.appendChild(actions);
+    return card;
+  }
+
+  function renderReviewReveal(data, answer, body) {
+    var mine = String(answer || '').trim();
+    var yourSection = el('section', 'review-section');
+    yourSection.appendChild(el('h4', 'review-section-title', '你的回答'));
+    yourSection.appendChild(mine
+      ? el('p', 'review-your-answer', mine)
+      : el('p', 'review-hint', '（没写，直接看了答案）'));
+    body.appendChild(yourSection);
+
+    var chunks = Array.isArray(data.chunks) ? data.chunks : [];
+    var refSection = el('section', 'review-section');
+    refSection.appendChild(el('h4', 'review-section-title',
+      data.chunks_source === 'search'
+        ? '参考原文（现检索结果：评测标注的块 id 对不上当前索引）'
+        : '参考原文（评测标注的正确段落）'));
+    if (chunks.length) {
+      chunks.forEach(function (item, index) {
+        refSection.appendChild(reviewChunkCard(item, index + 1));
+      });
+    } else {
+      refSection.appendChild(el('p', 'review-hint', '没有取到原文：索引里找不到对应的块。'));
+    }
+    body.appendChild(refSection);
+
+    var answerSection = el('section', 'review-section');
+    answerSection.appendChild(el('h4', 'review-section-title', '参考答案'));
+    var slot = el('div');
+    var noAnswerer = state.health && state.health.answerer === false;
+    var askButton = el('button', 'ghost small', '生成参考答案');
+    askButton.type = 'button';
+    if (noAnswerer) {
+      askButton.disabled = true;
+      askButton.title = '启动时没有可用的模型客户端（检查 DEEPSEEK_API_KEY）';
+      slot.appendChild(el('p', 'review-hint', '没配置模型 key，只能看上面的原文。'));
+    }
+    askButton.addEventListener('click', function () { reviewAsk(data, slot, askButton); });
+    slot.appendChild(askButton);
+    answerSection.appendChild(slot);
+    body.appendChild(answerSection);
+  }
+
+  async function reviewAsk(data, slot, button) {
+    var label = button.textContent;
+    button.disabled = true;
+    button.textContent = '生成中…';
+    try {
+      var result = await api('/api/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q: data.question, top_k: 5 })
+      });
+      var wrap = el('div', 'answer-body');
+      renderAnswerText(wrap, result.text || '', 0);
+      slot.replaceChildren(wrap);
+      slot.appendChild(el('p', 'review-hint',
+        result.refused
+          ? '模型认为资料不足，上面的原文仍然可以看。'
+          : '由 ' + (result.model || '模型') + ' 基于检索到的原文生成，以原文为准。'));
+      var citations = result.citations || [];
+      if (citations.length) {
+        var list = el('div', 'review-citations');
+        list.appendChild(el('div', null, '引用：'));
+        citations.forEach(function (citation) {
+          var line = (citation.repo ? citation.repo + '/' : '') + citation.rel_path;
+          if (citation.line_start) line += ':' + citation.line_start;
+          list.appendChild(el('div', 'review-cite', '[' + citation.ref + '] ' + line));
+        });
+        slot.appendChild(list);
+      }
+    } catch (err) {
+      slot.replaceChildren();
+      slot.appendChild(el('p', 'meta bad', '生成失败：' + err.message));
+    } finally {
+      button.disabled = false;
+      button.textContent = label;
+    }
   }
 
   /* ================================================================
@@ -1922,6 +2234,7 @@
 
     // Esc：先关最上层浮层；都没有时清空输入并失焦
     if (event.key === 'Escape') {
+      if (isReviewOpen()) { closeReview(); return; }
       if (isStatsOpen()) { closeStats(); return; }
       if (state.historyOpen) { closeHistory(); return; }
       var box = $('query-input');
@@ -2064,6 +2377,15 @@
     if (overlay) {
       overlay.addEventListener('click', function (event) {
         if (event.target === overlay) closeStats();
+      });
+    }
+
+    on('review-btn', 'click', function () { openReview(''); });
+    on('review-close', 'click', closeReview);
+    var reviewPanel = $('review-panel');
+    if (reviewPanel) {
+      reviewPanel.addEventListener('click', function (event) {
+        if (event.target === reviewPanel) closeReview();
       });
     }
 

@@ -8,8 +8,10 @@
 它做的事：
   · 复制代码（src / tools / ingest.py / config.toml）和部署文件
   · 复制检索索引，**跳过 profile** —— 那是个人简历，不能公开
+  · 复制 results/run_hybrid.json —— 「今日复习」的题库，40 KB，不复制的话
+    那个入口在线上只会显示「题库读不出来」
   · 生成带 HF front-matter 的 README.md（Spaces 靠这个识别 SDK 和端口）
-  · 不复制 data/raw、models、.pylibs*、tests、results
+  · 不复制 data/raw、models、.pylibs*、tests
 
 复制完不会自动 push，git 相关操作留给人工确认。
 """
@@ -32,6 +34,9 @@ FILES = [
     "requirements-deploy.txt",
     "Dockerfile",
     ".dockerignore",
+    # 「今日复习」的题库。上面那个 [web].review_file 是相对路径，
+    # 复制到 Space 后能直接在 results/ 下找到。
+    "results/run_hybrid.json",
 ]
 
 # 整个目录都要带
@@ -148,7 +153,9 @@ def main(argv: list[str] | None = None) -> int:
         if not src.exists():
             print(f"[!] 缺少 {name}，跳过")
             continue
-        shutil.copy2(src, target / name)
+        dest = target / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
 
     for name in DIRS:
         src = ROOT / name

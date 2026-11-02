@@ -208,6 +208,7 @@ python ingest.py web --index-dir G:\kb\data\index --model-dir G:\kb\models\bge-m
   模型就绪 : 2.7s（预热检索）
   问答     : 已启用（deepseek-chat）
 --------------------------------------------------------------------
+  复习题库 : 6 道失败题（results/run_hybrid.json）
   打开 http://127.0.0.1:8123    （Ctrl+C 停止服务）
 ====================================================================
 ```
@@ -219,7 +220,8 @@ python ingest.py web --index-dir G:\kb\data\index --model-dir G:\kb\models\bge-m
 界面：顶部输入框 + 检索 / 问答切换；检索结果是卡片，显示排名、分数、标题路径、
 `repo/rel_path:行号`、4 行摘要，两个按钮「展开全文」「在 VS Code 打开」；问答显示
 答案和引用，正文里的 `[1]` 是可点的角标，点了滚到对应引用并高亮；拒答单独配色并
-显示原因；底部状态条是块数、embedder、是否就绪和上次查询耗时。
+显示原因；底部状态条是块数、embedder、是否就绪和上次查询耗时，右侧是「今日复习」
+「统计」两个入口。
 
 路由：
 
@@ -230,10 +232,36 @@ python ingest.py web --index-dir G:\kb\data\index --model-dir G:\kb\models\bge-m
 | POST | `/api/ask` | body `{"q": "...", "top_k": 5}`，返回 `Answer.to_dict()` |
 | GET | `/api/open?chunk_id=...` | 在编辑器打开该块的源文件；未知 id 返回 404 |
 | GET | `/api/health` | 就绪状态、块数、embedder、模型目录、编辑器 |
+| GET | `/api/review/today?day=2026-11-02` | 今日复习：一道评测失败题 + 参考原文；`day` 可选，用来指定日期 |
 
-Python 侧入口是 `kb.web.app.create_app(retriever, answerer=None, *, raw_dir, editor=None)`。
+Python 侧入口是 `kb.web.app.create_app(retriever, answerer=None, *, raw_dir, editor=None, review_file=None)`。
 `retriever` / `answerer` 由调用方构造好再传进去，`create_app` 自己不做任何加载 ——
 这就是「只加载一次」的实现方式。
+
+#### 今日复习
+
+右下角「今日复习」按日期出一道评测里没检索到的题：先自己答，点「我答完了，看参考」
+再展开知识库里的原文，需要的话再让模型基于这些段落作答。
+
+题库来自 `[web].review_file` 指向的评测结果（默认 `results/run_hybrid.json`），
+取 `per_query` 里 `rank` 缺失或大于 5 的条目，也就是前 5 条没命中的题。当前 40 条
+评测里有 6 条（q008 / q012 / q016 / q019 / q024 / q036）。按东八区的日期取模
+`date.toordinal() % 6` 轮换：同一天永远是同一道，6 天走完一圈。没有用户系统也没有
+定时任务，进页面时算一次日期就有答案。
+
+日期用固定 `+08:00`，不取进程本地时区：本地跑是 +08 没区别，但 HF Space 的容器默认
+UTC，用 `date.today()` 会在北京时间早上 8 点换题。中国没有夏令时，固定偏移和
+`Asia/Shanghai` 等价，还省掉 Windows 上要额外装 tzdata 的麻烦。
+
+参考原文优先用 `gold` 字段（评测标注的正确块）。这些块已经在 `retriever.meta` 里，
+按 `chunk_id` 直接取，不额外编码查询；18,276 块的索引上单次请求只剩查字典和一次
+日期取模。只有索引重建、`chunk_id` 对不上时才会退回一次实时检索，此时响应里的
+`chunks_source` 是 `search`，界面上会写明这是现检索结果而不是标注答案。
+
+题库文件缺失、格式不对、或者一条失败题都没有时，接口返回 200 + `available=false`
++ `reason`，页面显示一句原因，其它功能不受影响。
+
+答题草稿只放在页面内存里，刷新就没了 —— 没有用户系统，不做本地存储。
 
 ### 8. 评测
 
@@ -366,6 +394,7 @@ Web 参数：
 | `host` | `127.0.0.1` | 监听地址，`0.0.0.0` 表示局域网可访问 |
 | `port` | 8000 | 端口 |
 | `editor` | 空 | 空 = 自动探测 `code` → `notepad`；也可写命令名或 `code.cmd` 的绝对路径 |
+| `review_file` | `results/run_hybrid.json` | 「今日复习」的题库，一次评测的结果 JSON（相对项目根）；留空关掉入口 |
 
 Web 没有单独的语料根目录配置，`/api/open` 和 `search --open` 都用 `[path].raw_dir`。
 两处配同一个目录迟早会不一致，临时换目录用 `--raw-dir`。

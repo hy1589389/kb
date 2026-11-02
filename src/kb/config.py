@@ -243,11 +243,15 @@ class WebConfig:
 
     这里不放开 `raw_dir`：语料根目录只有 `[path].raw_dir` 一个来源，
     两处配置同一个目录迟早会不一致。要换目录用 `--raw-dir`。
+
+    `review_file` 是「今日复习」的题库，指向一次评测的结果 JSON（相对项目根，
+    绝对路径也认）。留空 = 关掉这个入口；文件不存在只是入口显示一句原因。
     """
 
     host: str = "127.0.0.1"
     port: int = 8000
     editor: str = ""
+    review_file: str = "results/run_hybrid.json"
 
     @classmethod
     def load(cls, config_path: Path | None = None) -> "WebConfig":

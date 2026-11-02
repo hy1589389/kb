@@ -1051,6 +1051,14 @@ def cmd_web(args: argparse.Namespace) -> int:
         port = int(web_cfg.port)
     raw_dir = _resolve_raw_dir(args)
     editor = (args.editor or web_cfg.editor or "").strip() or detect_editor()
+    # 「今日复习」题库：相对路径按项目根算（和 [collections] 的路径同一条规矩），
+    # 绝对路径原样用。文件不存在不报错，只是入口显示一句原因。
+    review_file = (web_cfg.review_file or "").strip()
+    review_path: Path | None = None
+    if review_file:
+        review_path = Path(review_file)
+        if not review_path.is_absolute():
+            review_path = PROJECT_ROOT / review_path
 
     # 0.0.0.0 是监听地址，不是能点开的地址
     display_host = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
@@ -1142,7 +1150,13 @@ def cmd_web(args: argparse.Namespace) -> int:
     print("-" * 68)
 
     app = create_app(retriever, answerer, raw_dir=raw_dir, editor=editor,
-                     default_collections=plan["default"])
+                     default_collections=plan["default"],
+                     review_file=review_path)
+    bank = getattr(app.state, "review", None) or {}
+    if bank.get("items"):
+        print(f"  复习题库 : {len(bank['items'])} 道失败题（{bank['source']}）")
+    else:
+        print(f"  复习题库 : 未启用（{bank.get('reason') or '没有题库'}）")
     print(f"  打开 {url}    （Ctrl+C 停止服务）")
     print("=" * 68)
     # uvicorn 启动后 stdout 会被它接管（日志走自己的 handler），这里先冲干净：

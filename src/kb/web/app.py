@@ -15,6 +15,7 @@
     GET  /api/collections  集合列表（名字 / 块数 / 有没有索引）+ 默认选中的集合
     GET  /api/health       块数 / embedder / 就绪状态 / 集合列表
     GET  /api/stats        索引统计（按集合分组 + 顶层汇总）
+    GET  /api/review/today 今日复习：按日期挑一道评测失败题 + 参考原文
 
 ## 多集合
 
@@ -55,6 +56,7 @@ from pydantic import BaseModel
 
 from ..generate.llm import LLMError
 from .editor import detect_editor, open_in_editor, resolve_source_path
+from .review import REVIEW_MAX_CHUNKS, load_review_bank, parse_review_day
 
 __all__ = ["create_app", "STATIC_DIR", "TEXT_PREVIEW_CHARS"]
 
@@ -394,7 +396,8 @@ def _build_stats(retriever: Any, dirs: Mapping[str, Path | None] | None = None) 
 
 def create_app(retriever: Any, answerer: Any = None, *,
                raw_dir: Path | str, editor: str | None = None,
-               default_collections: list[str] | None = None) -> FastAPI:
+               default_collections: list[str] | None = None,
+               review_file: Path | str | None = None) -> FastAPI:
     """构造 FastAPI 应用。
 
     参数
@@ -408,6 +411,9 @@ def create_app(retriever: Any, answerer: Any = None, *,
     editor    : 'code' / 'notepad' / 可执行文件路径；None 表示启动时自动探测一次。
     default_collections : `/api/search` 不传 `collections` 时查哪些集合。留空
                  等于「全部已加载的集合」；传了不存在的名字会被忽略。
+    review_file : 评测结果 JSON（`results/run_hybrid.json`），「今日复习」的题库。
+                 不传 / 读不出来时该入口返回 `available=false` 和一句原因，
+                 其它功能不受影响。
     """
     if retriever is None:
         raise ValueError("create_app 需要已经构造好的 retriever，不能传 None")
@@ -441,6 +447,8 @@ def create_app(retriever: Any, answerer: Any = None, *,
     app.state.default_collections = defaults
     # 一次算好；`/api/stats` 只读这个缓存，不再碰磁盘
     app.state.stats = _build_stats(retriever, collection_dirs)
+    # 「今日复习」题库：评测结果只在这里读一遍，之后每个请求只是算日期取模
+    app.state.review = load_review_bank(review_file)
 
     hit_cache: dict[str, dict] = {}
     meta_index: dict[str, dict] | None = None
@@ -519,6 +527,31 @@ def create_app(retriever: Any, answerer: Any = None, *,
                 detail=f"不存在的集合：{', '.join(missing)}。可用集合：{available}",
             )
         return names
+
+    def review_chunks(item: dict) -> tuple[list[dict], str]:
+        """复习题的参考原文：优先取 gold 块，取不到再实时检索。
+
+        gold 是评测集标注的正确段落，id 已经在 `retriever.meta` 里，直接查
+        等于 0 次查询编码，比重新检索更准也更快。只有 chunk_id 对不上
+        （索引重建过、id 变了）时才退到检索；这时返回的是「系统认为相关的
+        段落」，`chunks_source` 会如实写 `search`，前端照实标注来源。
+        """
+        chunks: list[dict] = []
+        for cid in [str(c) for c in (item.get("gold") or [])][:REVIEW_MAX_CHUNKS]:
+            data = from_meta(cid)
+            if data is None:
+                chunks = []
+                break
+            chunks.append(to_result(data, len(chunks) + 1))
+        if chunks:
+            return chunks, "gold"
+
+        try:
+            hits = retriever.search(item["question"], top_k=REVIEW_MAX_CHUNKS)
+        except (FileNotFoundError, RuntimeError, ValueError):
+            return [], "none"
+        return ([to_result(hit, index) for index, hit in enumerate(hits, start=1)],
+                "search")
 
     # ------------------------------------------------------------- 路由
 
@@ -712,5 +745,58 @@ def create_app(retriever: Any, answerer: Any = None, *,
             for entry in body.get("collections") or []
         ]
         return body
+
+    @app.get("/api/review/today")
+    def api_review_today(
+        day: str = Query("", description="覆盖日期 YYYY-MM-DD，默认今天"),
+    ) -> dict:
+        """今日复习：按日期从「评测失败题」里挑一道，附参考原文。
+
+        没有用户系统也没有定时任务：同一天永远是同一道，隔天换一道，题库
+        轮完再从头开始。题库本身在 `create_app` 时读好了，这里只做取模。
+
+        题库不可用（没配文件 / 文件坏了 / 没有失败题）时返回 200 +
+        `available=false`，原因放在 `reason` 里 —— 这是正常状态，不是请求错误，
+        前端可以照常渲染一句话，不用走错误分支。
+        """
+        bank = app.state.review or {}
+        try:
+            target = parse_review_day(day)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        items = bank.get("items") or []
+        body = {
+            "available": False,
+            "date": target.isoformat(),
+            "source": str(bank.get("source") or ""),
+            "reason": str(bank.get("reason") or "没有可复习的题目"),
+            "total": len(items),
+            "n_evaluated": int(bank.get("n_evaluated") or 0),
+            "top_k": int(bank.get("top_k") or 5),
+            "eval_top_k": int(bank.get("eval_top_k") or 0),
+            # 不可用时也给空列表，前端不用先判断键在不在
+            "chunks_source": "",
+            "chunks": [],
+        }
+        if not items:
+            return body
+
+        position = target.toordinal() % len(items)
+        item = items[position]
+        chunks, chunks_source = review_chunks(item)
+        return {
+            **body,
+            "available": True,
+            "reason": "",
+            "seq": position + 1,
+            "qid": item["qid"],
+            "question": item["question"],
+            "category": item["category"],
+            "difficulty": item["difficulty"],
+            "rank": item["rank"],
+            "chunks_source": chunks_source,
+            "chunks": chunks,
+        }
 
     return app

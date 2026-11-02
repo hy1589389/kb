@@ -138,3 +138,7 @@ timeout = 60           # 单次请求超时（秒）
 host = "127.0.0.1"
 port = 8000
 editor = ""            # 留空 = 自动探测 code -> notepad
+
+# 「今日复习」的题库：一次评测的结果 JSON（相对项目根目录，绝对路径也认）。
+# 题目取自 per_query 里前 5 条没命中的条目，按日期轮换。留空 = 关掉入口。
+review_file = "results/run_hybrid.json"
