@@ -134,14 +134,19 @@ class FakeRetriever:
         self.calls: list[dict] = []
 
     def search(self, query: str, top_k: int = 10, *, use_dense: bool = True,
-               use_sparse: bool = True, use_rerank: bool = False):
-        self.calls.append({
+               use_sparse: bool = True, use_rerank: bool = False,
+               collections: list[str] | str | None = None):
+        call = {
             "query": query,
             "top_k": top_k,
             "use_dense": use_dense,
             "use_sparse": use_sparse,
             "use_rerank": use_rerank,
-        })
+        }
+        # 只有真的传了 collections 才记这一项，老用例的断言不受影响
+        if collections:
+            call["collections"] = collections
+        self.calls.append(call)
         out = self.hits[:top_k]
         return [replace(h, rank=i, source=self.source)
                 for i, h in enumerate(out, start=1)]
@@ -389,6 +394,31 @@ class TestAnswerer(unittest.TestCase):
         # 提示词里确实带了资料
         user = fake.calls[0]["messages"][1]["content"]
         self.assertIn("[1] 来源：", user)
+
+    def test_collections_passed_through_to_retriever(self):
+        """传了集合就限制检索范围：问技术问题时简历不该进候选。"""
+        hits = [make_hit(1), make_hit(2)]
+        responder = "HashMap 在链表长度达到 8 时转为红黑树[1]。"
+        answerer, retriever, _ = self._answerer(hits, responder)
+
+        answerer.answer("HashMap 什么时候转红黑树", top_k=2,
+                        collections=["tech"])
+
+        self.assertEqual(retriever.calls[0]["collections"], ["tech"])
+
+    def test_no_collections_means_omit_parameter(self):
+        """不传集合时不能把 collections=None 塞给 retriever。
+
+        单索引的 Retriever 和测试里的假对象都只认前三个关键字参数，
+        塞一个 None 进去会让它们直接 TypeError。
+        """
+        hits = [make_hit(1)]
+        responder = "HashMap 在链表长度达到 8 时转为红黑树[1]。"
+        answerer, retriever, _ = self._answerer(hits, responder)
+
+        answerer.answer("HashMap 什么时候转红黑树", top_k=1)
+
+        self.assertNotIn("collections", retriever.calls[0])
 
     def test_insufficient_marker_refuses(self):
         answerer, _, fake = self._answerer(

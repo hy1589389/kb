@@ -923,6 +923,43 @@ class TestCli(unittest.TestCase):
         seed_corpus(cfg)
         return cli_config(tmp)
 
+    def test_ask_with_collection(self):
+        """`cmd_ask` 要能按集合跑。
+
+        把单索引改成多索引时漏改了打印那一行的 `index_dir`，单元测试没覆盖
+        CLI 的 ask 路径，真跑时才 NameError。这条用例就是补这个洞。
+        """
+        from unittest.mock import patch
+
+        with temp_dir("cli_ask") as tmp:
+            config = self._setup(tmp)
+            code, out = run_cli(["ingest", "--config", str(config)])
+            self.assertEqual(code, 0, out)
+            for name in ("tech", "profile"):
+                code, out = run_cli(["index", "--collection", name, "--config",
+                                     str(config), "--embedder", "hashing"])
+                self.assertEqual(code, 0, out)
+
+            class FakeLLM:
+                def __init__(self, **kwargs) -> None:
+                    pass
+
+                def complete(self, messages, *, temperature=0.0, max_tokens=0):
+                    return ("红黑树在链表长度到 8 时启用[1]。",
+                            {"prompt_tokens": 10, "completion_tokens": 5,
+                             "total_tokens": 15})
+
+                def close(self) -> None:
+                    pass
+
+            with patch("kb.generate.llm.DeepSeekClient", FakeLLM):
+                code, out = run_cli(["ask", "HashMap 红黑树",
+                                     "--collection", "tech",
+                                     "--config", str(config),
+                                     "--top-k", "2"])
+            self.assertEqual(code, 0, out)
+            self.assertIn("集合: tech", out)
+
     def test_ingest_index_search(self):
         with temp_dir("cli1") as tmp:
             config = self._setup(tmp)

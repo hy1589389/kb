@@ -73,10 +73,11 @@ _HIT_CACHE_LIMIT = 5000
 
 
 class AskRequest(BaseModel):
-    """`POST /api/ask` 的请求体。两个字段都有默认值，缺省也能进来再报错。"""
+    """`POST /api/ask` 的请求体。字段都有默认值，缺省也能进来再报错。"""
 
     q: str = ""
     top_k: int = 5
+    collections: list[str] | None = None
 
 
 def _as_dict(hit: Any) -> dict:
@@ -594,13 +595,25 @@ def create_app(retriever: Any, answerer: Any = None, *,
         if not question:
             raise HTTPException(status_code=400, detail="问题 q 不能为空")
         top_k = max(1, min(int(payload.top_k or 5), MAX_TOP_K))
+        # 和 /api/search 用同一套解析：不传走默认集合，all 查全部，未知名字 400。
+        # 这样「问技术问题」时简历不会被检索进提示词。
+        # 单索引模式下集合名是空串，这里滤掉 —— 空名不是真的集合，传给
+        # answerer 只会让鸭子类型的假对象多收一个没用的参数。
+        chosen = [name for name in pick_collections(payload.collections) if name]
 
         started = time.perf_counter()
         try:
-            answer = answerer.answer(question, top_k=top_k)
+            answer = answerer.answer(question, top_k=top_k, collections=chosen)
         except LLMError as exc:
             # LLMError 的消息在 llm.py 里过了一遍脱敏，不含 key / 请求头
             raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
+        except TypeError as exc:
+            # 自定义 answerer 可能只有 answer(question, top_k=...)。退回不带集合的调用，
+            # 不能因为多传了一个关键字参数就让整个问答不可用。
+            if "collections" not in str(exc):
+                raise
+            answer = answerer.answer(question, top_k=top_k)
+            chosen = []
         except (FileNotFoundError, RuntimeError, ValueError) as exc:
             raise HTTPException(status_code=500, detail=f"问答失败：{exc}") from exc
         elapsed_ms = int(round((time.perf_counter() - started) * 1000))
@@ -610,6 +623,7 @@ def create_app(retriever: Any, answerer: Any = None, *,
         for hit in body.get("hits") or []:
             remember(hit)
         body["elapsed_ms"] = elapsed_ms
+        body["collections"] = chosen
         return body
 
     @app.get("/api/open")

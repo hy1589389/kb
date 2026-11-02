@@ -1142,7 +1142,9 @@
 
     var hint = $('collection-hint');
     if (hint) {
-      hint.textContent = state.mode === 'ask' ? '问答模式目前按全部集合检索' : '';
+      // 检索和问答都按选中的集合走，这里只提示当前生效的集合数
+      hint.textContent = state.activeCollections.length
+        ? '' : '未选择集合，将使用默认集合';
     }
     if (!state.collections.length) {
       wrap.classList.add('hidden');
@@ -1670,10 +1672,13 @@
   }
 
   async function ask(query) {
+    var body = { q: query, top_k: 5 };
+    // 和检索模式共用同一套集合选择：问技术问题时不会把简历带进提示词
+    if (state.activeCollections.length) body.collections = state.activeCollections;
     var data = await api('/api/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ q: query, top_k: 5 })
+      body: JSON.stringify(body)
     });
     state.lastServerMs = typeof data.elapsed_ms === 'number' ? data.elapsed_ms : null;
     state.terms = splitTerms(query);

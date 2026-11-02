@@ -167,8 +167,13 @@ class FakeAnswerer:
         self.calls: list[dict] = []
 
     def answer(self, question: str, *, top_k: int = 5,
-               use_rerank: bool = False) -> Answer:
-        self.calls.append({"question": question, "top_k": top_k})
+               use_rerank: bool = False,
+               collections: list[str] | str | None = None) -> Answer:
+        # collections 只在传了的时候记进 calls，老用例的断言（只有 question/top_k）不受影响
+        call: dict = {"question": question, "top_k": top_k}
+        if collections:
+            call["collections"] = list(collections)
+        self.calls.append(call)
         return self.answer_obj
 
 
@@ -729,15 +734,84 @@ class MultiCollectionTests(TempCorpus):
         text = "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows)
         (directory / "chunks_meta.jsonl").write_text(text, encoding="utf-8")
 
-    def build_app(self, *, default_collections=None, hits=None):
+    def build_app(self, *, default_collections=None, hits=None, answerer=None):
         retriever = FakeRetriever(
             self.hits if hits is None else hits,
             index_dirs={"tech": self.tech_dir, "profile": self.profile_dir},
         )
-        app = create_app(retriever, None, raw_dir=self.raw, editor="code",
+        app = create_app(retriever, answerer, raw_dir=self.raw, editor="code",
                          default_collections=default_collections)
         self.retriever = retriever
         return app
+
+    # ---- /api/ask 的集合过滤 ----
+
+    def test_ask_passes_collections_to_answerer(self) -> None:
+        """选了集合就得传到 answerer，否则问技术问题时简历会被带进提示词。"""
+        answerer = FakeAnswerer(make_answer(self.hits[0]))
+        app = self.build_app(default_collections=["tech"], answerer=answerer)
+        with TestClient(app) as client:
+            res = client.post("/api/ask",
+                              json={"q": "RAG 是什么", "top_k": 3,
+                                    "collections": ["profile"]})
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["collections"], ["profile"])
+        self.assertEqual(answerer.calls[-1]["collections"], ["profile"])
+
+    def test_ask_without_collections_uses_default(self) -> None:
+        answerer = FakeAnswerer(make_answer(self.hits[0]))
+        app = self.build_app(default_collections=["tech"], answerer=answerer)
+        with TestClient(app) as client:
+            res = client.post("/api/ask", json={"q": "RAG 是什么"})
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["collections"], ["tech"])
+        self.assertEqual(answerer.calls[-1]["collections"], ["tech"])
+
+    def test_ask_unknown_collection_is_400(self) -> None:
+        app = self.build_app(default_collections=["tech"],
+                             answerer=FakeAnswerer(make_answer(self.hits[0])))
+        with TestClient(app) as client:
+            res = client.post("/api/ask",
+                              json={"q": "RAG 是什么", "collections": ["nope"]})
+
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("nope", res.json()["detail"])
+        self.assertIn("tech", res.json()["detail"])
+
+    def test_ask_all_keyword_is_expanded(self) -> None:
+        answerer = FakeAnswerer(make_answer(self.hits[0]))
+        app = self.build_app(default_collections=["tech"], answerer=answerer)
+        with TestClient(app) as client:
+            res = client.post("/api/ask",
+                              json={"q": "RAG 是什么", "collections": ["all"]})
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["collections"], ["tech", "profile"])
+
+    def test_ask_answerer_without_collections_param_still_works(self) -> None:
+        """自定义 answerer 只接受 (question, top_k) 时，不能因为多传参数就挂掉。"""
+
+        class StrictAnswerer:
+            def __init__(self, answer: Answer) -> None:
+                self.answer_obj = answer
+                self.calls: list[dict] = []
+
+            def answer(self, question: str, *, top_k: int = 5) -> Answer:
+                self.calls.append({"question": question, "top_k": top_k})
+                return self.answer_obj
+
+        strict = StrictAnswerer(make_answer(self.hits[0]))
+        app = self.build_app(default_collections=["tech"], answerer=strict)
+        with TestClient(app) as client:
+            res = client.post("/api/ask",
+                              json={"q": "RAG 是什么", "collections": ["profile"]})
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(strict.calls, [{"question": "RAG 是什么", "top_k": 5}])
+        # 退化调用时没有真的按集合过滤，响应里如实返回空，不谎报
+        self.assertEqual(res.json()["collections"], [])
 
     # ---- /api/collections ----
 

@@ -106,13 +106,18 @@ class Answerer:
     # ------------------------------------------------------------ 对外
 
     def answer(self, question: str, *, top_k: int = 5,
-               use_rerank: bool = False) -> Answer:
-        """检索并生成带引用的答案。模型调用失败时抛 `LLMError`。"""
+               use_rerank: bool = False,
+               collections: list[str] | str | None = None) -> Answer:
+        """检索并生成带引用的答案。模型调用失败时抛 `LLMError`。
+
+        `collections` 只在多集合模式下有意义：传了就把检索限制在那几个集合里，
+        简历（`profile`）不会被带进技术问题的提示词。留空查全部。
+        """
         t0 = time.perf_counter()
         question = question or ""
         k = int(top_k) if top_k else int(self.cfg["top_k"])
 
-        hits = self._retrieve(question, k, use_rerank)
+        hits = self._retrieve(question, k, use_rerank, collections)
         if not hits:
             return self._refuse(question, REFUSE_NO_HITS, hits, t0,
                                 detail="检索没有返回任何块")
@@ -169,12 +174,17 @@ class Answerer:
     # ------------------------------------------------------------ 内部
 
     def _retrieve(self, question: str, top_k: int,
-                  use_rerank: bool) -> list[SearchHit]:
+                  use_rerank: bool,
+                  collections: list[str] | str | None = None) -> list[SearchHit]:
         query = (question or "").strip()
         if not query:
             # 空问题不查索引：BM25 对空串返回空，但没必要走一遍
             return []
-        return self.retriever.search(query, top_k=top_k, use_rerank=use_rerank)
+        # collections 留空时不传这个参数：单索引的 Retriever 和测试里的假
+        # retriever 都只接受前三个关键字参数。
+        extra = {"collections": collections} if collections else {}
+        return self.retriever.search(query, top_k=top_k, use_rerank=use_rerank,
+                                     **extra)
 
     def _passes_threshold(self, hits: list[SearchHit]) -> bool:
         """第一层的第 2 条：top1 分数是否达到 `min_top_score`。"""

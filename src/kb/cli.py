@@ -877,31 +877,45 @@ def cmd_ask(args: argparse.Namespace) -> int:
 
     rc = _load_retrieval_config(args)
     gc = _load_generate_config(args)
-    index_dir = rc.index_dir
-    if not index_dir.exists():
-        print(f"[X] 索引目录不存在：{index_dir}")
-        print("    先建索引：python ingest.py index --chunks <chunks.jsonl>")
-        return 2
+    ingest_cfg = _load_ingest_config(args)
 
+    # 和 search 共用同一套集合解析：给了 --collection 就只查那几个集合，
+    # 否则按 [collections].default_search；--index-dir 退化成旧的单索引模式。
     try:
-        index_info = json.loads(
-            (index_dir / "index_meta.json").read_text(encoding="utf-8")
-        )
-    except (OSError, ValueError):
-        print(f"[X] {index_dir / 'index_meta.json'} 读不出来，索引可能不完整，请重建。")
+        index_arg, _labels, _selected, weights = _resolve_search_indexes(
+            args, ingest_cfg)
+    except FileNotFoundError as exc:
+        print(f"[X] {exc}")
         return 2
 
+    dirs = index_arg.values() if isinstance(index_arg, dict) else [index_arg]
     embedder = None
-    if "hashing" in str(index_info.get("embedder", "")).lower():
-        embedder = HashingEmbedder(dim=int(index_info.get("dim", 512)))
+    for directory in dirs:
+        info_path = Path(directory) / "index_meta.json"
+        if not info_path.exists():
+            print(f"[X] 索引目录不完整：{info_path} 不存在，请重建索引。")
+            return 2
+        try:
+            index_info = json.loads(info_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            print(f"[X] {info_path} 读不出来，索引可能不完整，请重建。")
+            return 2
+        if "hashing" in str(index_info.get("embedder", "")).lower():
+            embedder = HashingEmbedder(dim=int(index_info.get("dim", 512)))
+        break
 
     # --no-rerank 优先：配置里开了 use_reranker 也能被它关掉
     want_rerank = (bool(args.use_rerank) or bool(rc.use_reranker)) \
         and not args.no_rerank
 
+    retriever_cfg = rc.to_retriever_cfg()
+    if isinstance(index_arg, dict):
+        retriever_cfg["collections"] = weights
+    ask_collections = list(index_arg) if isinstance(index_arg, dict) else None
+
     try:
-        retriever = Retriever(index_dir, embedder=embedder,
-                              cfg=rc.to_retriever_cfg())
+        retriever = Retriever(index_arg, embedder=embedder,
+                              cfg=retriever_cfg)
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         print(f"[X] {exc}")
         return 2
@@ -923,7 +937,8 @@ def cmd_ask(args: argparse.Namespace) -> int:
     try:
         answerer = Answerer(retriever, llm, cfg=gc.to_answerer_cfg())
         ans = answerer.answer(args.question, top_k=gc.top_k,
-                              use_rerank=want_rerank)
+                              use_rerank=want_rerank,
+                              collections=ask_collections)
     except LLMError as exc:
         # exc 的消息里不含请求头；这里也只打印消息本身
         print(f"[X] 调用模型失败：{exc}")
@@ -945,7 +960,11 @@ def cmd_ask(args: argparse.Namespace) -> int:
 
     mode = "hybrid" + (" + rerank" if want_rerank else "")
     print(f"问题: {ans.question}")
-    print(f"索引: {index_dir}")
+    if isinstance(index_arg, dict):
+        # 多集合：列名字，不列完整路径（太长）
+        print(f"集合: {', '.join(index_arg)}")
+    else:
+        print(f"索引: {index_arg}")
     print(f"模型: {ans.model}   检索模式: {mode}   "
           f"上下文块数: {ans.context_chunks}/{len(ans.hits)}   "
           f"耗时: {ans.latency_ms} ms")
@@ -1224,6 +1243,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_ask.add_argument("question", help="问题")
     p_ask.add_argument("--config", help="config.toml 路径（默认项目根目录下）")
     p_ask.add_argument("--index-dir", dest="index_dir", help="索引目录")
+    p_ask.add_argument("--collection", dest="collection",
+                       help="只查这些集合（逗号分隔，或用 all）。"
+                            "默认取 [collections].default_search")
     p_ask.add_argument("--model-dir", dest="model_dir", help="bge-m3 ONNX 目录")
     p_ask.add_argument("--reranker-dir", dest="reranker_dir", help="重排模型目录")
     p_ask.add_argument("--top-k", type=int, dest="top_k",
