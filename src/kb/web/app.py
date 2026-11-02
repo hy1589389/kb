@@ -9,16 +9,31 @@
 路由：
 
     GET  /                 单文件前端
-    GET  /api/search       q / top_k / mode(hybrid|dense|sparse)
+    GET  /api/search       q / top_k / mode(hybrid|dense|sparse) / collections
     POST /api/ask          {"q": ..., "top_k": ...} -> Answer.to_dict()
     GET  /api/open         chunk_id -> 编辑器打开源文件
-    GET  /api/health       块数 / embedder / 就绪状态
-    GET  /api/stats        索引统计（块数 / 各仓库块数 / 平均长度 / 目录大小）
+    GET  /api/collections  集合列表（名字 / 块数 / 有没有索引）+ 默认选中的集合
+    GET  /api/health       块数 / embedder / 就绪状态 / 集合列表
+    GET  /api/stats        索引统计（按集合分组 + 顶层汇总）
 
-`/api/stats` 要读一遍 24 MB 的 `chunks_meta.jsonl`，所以只在 `create_app`
-时算一次，结果缓存在 `app.state.stats`；之后每个请求只是把缓存抄一遍。
-这是启动期的一次性成本（真实索引 18276 行约 0.3 秒），换掉的是「每次有人点
-统计按钮就阻塞事件循环扫一遍文件」。
+## 多集合
+
+`Retriever` 可以是多索引模式（`{集合名: 索引目录}`），此时一个查询会先在
+每个集合内部各自融合，再按集合权重做一次跨集合 RRF。Web 层要做的只有两件事：
+
+1. 从 retriever 上把「集合名 -> 索引目录」拿出来（`_index_dir_map`），读各自的
+   `index_meta.json` 得到块数，`create_app` 时缓存进 `app.state.collections`；
+2. `/api/search` 把 `collections` 参数校验后原样透传给 `Retriever.search`，
+   结果里每条带 `collection` 字段。
+
+集合列表和块数**只在 create_app 时读一次**：`/api/collections` 每个请求都只是
+把 `app.state.collections` 抄一遍。索引目录是启动后就不再变的东西，重算没有
+意义，还会让一个前端 chip 的渲染变成 2 次磁盘读。
+
+`/api/stats` 要读一遍 24 MB 的 `chunks_meta.jsonl`，所以也只在 `create_app`
+时算一次（多集合时每个集合算一次），结果缓存在 `app.state.stats`；之后每个
+请求只是把缓存抄一遍。这是启动期的一次性成本（真实索引 18276 行约 0.3 秒），
+换掉的是「每次有人点统计按钮就阻塞事件循环扫一遍文件」。
 
 `/api/open` 需要知道 chunk 的 repo/rel_path/行号。`Retriever` 自己持有全部
 元数据（`.meta`），这里做两件事：优先查「本次进程里见过的检索结果」缓存，
@@ -30,6 +45,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -73,6 +89,7 @@ def _as_dict(hit: Any) -> dict:
     return {name: getattr(hit, name, None) for name in (
         "chunk_id", "repo", "rel_path", "breadcrumb",
         "line_start", "line_end", "text", "score", "source", "rank",
+        "collection", "locator",
     )}
 
 
@@ -134,14 +151,22 @@ def _iter_chunk_meta(path: Path):
                 yield row
 
 
-def _dir_size_mb(path: Path) -> float:
-    """目录总大小（MiB，保留 1 位）。单个文件 stat 失败不影响整体。"""
+def _dir_size_mb(path: Path, skip: tuple[Path, ...] = ()) -> float:
+    """目录总大小（MiB，保留 1 位）。单个文件 stat 失败不影响整体。
+
+    `skip` 是「已经算进别的集合」的子目录。真实索引就是这种情况：`tech` 的
+    索引目录是 `data/index`，而 `profile` 在 `data/index/profile` 下，不排掉
+    的话顶层汇总会把 profile 的大小算两遍。
+    """
     total = 0
     try:
         for item in path.rglob("*"):
             try:
-                if item.is_file():
-                    total += item.stat().st_size
+                if not item.is_file():
+                    continue
+                if any(root != path and item.is_relative_to(root) for root in skip):
+                    continue
+                total += item.stat().st_size
             except OSError:
                 continue
     except OSError:
@@ -153,19 +178,114 @@ def _dir_size_mb(path: Path) -> float:
 _UNKNOWN_REPO = "(未标注仓库)"
 
 
-def _build_stats(retriever: Any) -> dict:
-    """扫描索引目录，算出 `/api/stats` 的响应体。
-
-    只在 `create_app` 里调用一次。`chunks_meta.jsonl` 是主数据源；读不到时
-    退回 retriever 内存里的 `meta`，再不行用 `_count_chunks`。任何一步失败
-    都只是让统计变粗，不能让服务起不来。
-    """
-    raw_index_dir = str(getattr(retriever, "index_dir", "") or "").strip()
+def _safe_path(value: Any) -> Path | None:
+    """任意值 -> Path；空值 / 非法路径返回 None（索引目录来自配置，可能写错）。"""
+    text = str(value or "").strip()
+    if not text:
+        return None
     try:
-        index_dir = Path(raw_index_dir) if raw_index_dir else None
+        return Path(text)
     except (OSError, ValueError):
-        index_dir = None
+        return None
 
+
+def _read_index_meta(index_dir: Path | None) -> dict | None:
+    """读 `index_meta.json`；读不到或不是 JSON 对象都返回 None（当作没索引）。"""
+    if index_dir is None:
+        return None
+    try:
+        data = json.loads((index_dir / "index_meta.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _index_dir_map(retriever: Any) -> dict[str, Path | None]:
+    """`{集合名: 索引目录}`，多集合模式下就是 retriever 真正加载的那几份。
+
+    取值顺序：`retriever.index_dirs`（多索引模式）> `retriever.parts`（内部
+    加载结果）> `retriever.index_dir`（单索引兼容）。单索引且没有集合名时
+    键是空串 —— 这与 `Retriever._select_parts` 里「名字是空串 = 未指定」的
+    约定一致，任何集合名都会被当成「查全部」。
+    """
+    out: dict[str, Path | None] = {}
+
+    raw = getattr(retriever, "index_dirs", None)
+    if isinstance(raw, Mapping):
+        for name, path in raw.items():
+            out[str(name)] = _safe_path(path)
+        if out:
+            return out
+
+    parts = getattr(retriever, "parts", None)
+    if isinstance(parts, Mapping) and parts:
+        for name, part in parts.items():
+            out[str(name)] = _safe_path(getattr(part, "index_dir", None))
+        if out:
+            return out
+
+    names: list[str] = []
+    getter = getattr(retriever, "collection_names", None)
+    if callable(getter):
+        try:
+            names = [str(name) for name in getter() if str(name)]
+        except (TypeError, ValueError, AttributeError):
+            names = []
+    out[names[0] if names else ""] = _safe_path(getattr(retriever, "index_dir", None))
+    return out
+
+
+def _collection_rows(retriever: Any, name: str, *, single: bool) -> list:
+    """某个集合已经加载到内存里的块元数据（读不到索引文件时的退路）。"""
+    parts = getattr(retriever, "parts", None)
+    if isinstance(parts, Mapping) and name in parts:
+        rows = getattr(parts[name], "meta", None)
+        if rows:
+            return list(rows)
+    if single:
+        return list(getattr(retriever, "meta", None) or [])
+    return []
+
+
+def _collection_count(retriever: Any, name: str, *, single: bool) -> int:
+    """某个集合的块数退路：part.n_docs > 索引元数据 > 内存 meta 行数。"""
+    parts = getattr(retriever, "parts", None)
+    if isinstance(parts, Mapping) and name in parts:
+        try:
+            number = int(getattr(parts[name], "n_docs", 0) or 0)
+        except (TypeError, ValueError):
+            number = 0
+        if number:
+            return number
+    return _count_chunks(retriever) if single else 0
+
+
+def _collection_entries(retriever: Any, dirs: Mapping[str, Path | None]) -> list[dict]:
+    """`/api/collections` 的集合列表：块数取自各索引的 `index_meta.json`。
+
+    只在 `create_app` 里调用一次。索引文件读不到时 `has_index=False`，块数
+    退回内存里的元数据（单集合模式），不抛异常 —— 索引目录半残缺时服务
+    仍然要能起来，前端至少能显示「这个集合没有索引」。
+    """
+    single = len(dirs) == 1
+    entries: list[dict] = []
+    for name, index_dir in dirs.items():
+        info = _read_index_meta(index_dir)
+        has_index = info is not None
+        chunks = _int_or((info or {}).get("n_chunks"))
+        if not chunks:
+            chunks = _collection_count(retriever, name, single=single)
+        entries.append({
+            "name": str(name),
+            "chunks": int(chunks),
+            "has_index": bool(has_index),
+        })
+    return entries
+
+
+def _one_collection_stats(retriever: Any, name: str, index_dir: Path | None, *,
+                          single: bool, skip: tuple[Path, ...] = ()) -> dict:
+    """单个集合的统计。返回体里多一个 `total_chars`，给顶层汇总算平均用。"""
     counts: dict[str, int] = {}
     chunks = 0
     total_chars = 0
@@ -188,7 +308,7 @@ def _build_stats(retriever: Any) -> dict:
 
     if not chunks:
         # 假 retriever / 索引目录不完整时的退路：不读文件，用已经加载的元数据
-        for item in getattr(retriever, "meta", None) or []:
+        for item in _collection_rows(retriever, name, single=single):
             data = _as_dict(item)
             repo = str(data.get("repo") or "").strip() or _UNKNOWN_REPO
             counts[repo] = counts.get(repo, 0) + 1
@@ -198,37 +318,95 @@ def _build_stats(retriever: Any) -> dict:
             total_chars += max(0, _int_or(size))
             chunks += 1
         if not chunks:
-            chunks = _count_chunks(retriever)
+            chunks = _collection_count(retriever, name, single=single)
         if chunks and not counts:
             counts[_UNKNOWN_REPO] = chunks
 
     repos = [
-        {"name": name, "chunks": number}
-        for name, number in sorted(counts.items(),
-                                   key=lambda kv: (-kv[1], kv[0]))
+        {"name": repo, "chunks": number}
+        for repo, number in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
     ]
     return {
+        "name": str(name),
         "chunks": chunks,
         "repos": repos,
         "avg_chars": int(round(total_chars / chunks)) if chunks else 0,
         "index_dir": str(index_dir) if index_dir is not None else "",
-        "index_size_mb": _dir_size_mb(index_dir) if (
+        "index_size_mb": _dir_size_mb(index_dir, skip) if (
             index_dir is not None and index_dir.is_dir()) else 0.0,
+        "total_chars": total_chars,
+    }
+
+
+def _build_stats(retriever: Any, dirs: Mapping[str, Path | None] | None = None) -> dict:
+    """算出 `/api/stats` 的响应体：按集合分组 + 旧版顶层汇总字段。
+
+    只在 `create_app` 里调用一次。`chunks_meta.jsonl` 是主数据源；读不到时
+    退回 retriever 内存里的 `meta`，再不行用 `_count_chunks`。任何一步失败
+    都只是让统计变粗，不能让服务起不来。
+
+    顶层 `chunks` / `repos` / `avg_chars` / `index_size_mb` / `index_dir` 是
+    多集合之前就有的字段，一条都不能少（旧前端和旧测试都读它们），取值是
+    所有集合的汇总；新增的 `collections` 才是分组明细。
+    """
+    if dirs is None:
+        dirs = _index_dir_map(retriever)
+    single = len(dirs) == 1
+
+    entries: list[dict] = []
+    repo_totals: dict[str, int] = {}
+    total_chunks = 0
+    total_chars = 0
+    total_size = 0.0
+
+    for name, index_dir in dirs.items():
+        # 别的集合的索引目录若在这个目录下面，算大小时要排掉（避免重复计）
+        skip = tuple(
+            path for other, path in dirs.items()
+            if other != name and path is not None and index_dir is not None
+            and path != index_dir and path.is_relative_to(index_dir)
+        )
+        entry = _one_collection_stats(retriever, name, index_dir,
+                                      single=single, skip=skip)
+        total_chars += entry.pop("total_chars")
+        total_chunks += entry["chunks"]
+        total_size += entry["index_size_mb"]
+        entries.append(entry)
+        for repo in entry["repos"]:
+            repo_totals[repo["name"]] = repo_totals.get(repo["name"], 0) + repo["chunks"]
+
+    repos = [
+        {"name": repo, "chunks": number}
+        for repo, number in sorted(repo_totals.items(), key=lambda kv: (-kv[1], kv[0]))
+    ]
+    first_dir = next((path for path in dirs.values() if path is not None), None)
+    return {
+        "total_chunks": total_chunks,
+        "chunks": total_chunks,
+        "repos": repos,
+        "avg_chars": int(round(total_chars / total_chunks)) if total_chunks else 0,
+        "index_dir": str(first_dir) if first_dir is not None else "",
+        "index_size_mb": round(total_size, 1),
+        "collections": entries,
     }
 
 
 def create_app(retriever: Any, answerer: Any = None, *,
-               raw_dir: Path | str, editor: str | None = None) -> FastAPI:
+               raw_dir: Path | str, editor: str | None = None,
+               default_collections: list[str] | None = None) -> FastAPI:
     """构造 FastAPI 应用。
 
     参数
     ----
-    retriever : 任何有 `search(query, top_k=..., use_dense=..., use_sparse=...)`
-                的对象。**必须是已经构造好的实例**，本函数不负责加载。
+    retriever : 任何有 `search(query, top_k=..., use_dense=..., use_sparse=...,
+                 collections=...)` 的对象。**必须是已经构造好的实例**，本函数
+                 不负责加载。多索引模式下它的 `index_dirs` 决定有哪些集合。
     answerer  : `Answerer` 或鸭子类型（有 `answer(question, top_k=...)`）。
                 为 None 时 `/api/ask` 返回 503，检索照常可用。
-    raw_dir   : 语料仓库根目录（`<raw_dir>/<repo>/<rel_path>` 就是源文件）。
+    raw_dir   : 语料仓库根目录（`<raw_dir>/<collection>/<repo>/<rel_path>`）。
     editor    : 'code' / 'notepad' / 可执行文件路径；None 表示启动时自动探测一次。
+    default_collections : `/api/search` 不传 `collections` 时查哪些集合。留空
+                 等于「全部已加载的集合」；传了不存在的名字会被忽略。
     """
     if retriever is None:
         raise ValueError("create_app 需要已经构造好的 retriever，不能传 None")
@@ -236,6 +414,14 @@ def create_app(retriever: Any, answerer: Any = None, *,
     raw_root = Path(raw_dir).resolve()
     # 探测器只跑一次：每次请求都 which 一遍没必要，结果在整个进程里都一样。
     active_editor = (editor or "").strip() or detect_editor()
+
+    # 集合信息只在启动时读一次：名字 -> 索引目录 -> index_meta.json 里的块数
+    collection_dirs = _index_dir_map(retriever)
+    collections = _collection_entries(retriever, collection_dirs)
+    collection_names = [entry["name"] for entry in collections]
+    wanted = [str(name) for name in (default_collections or [])
+              if str(name) in collection_names]
+    defaults = wanted or list(collection_names)
 
     app = FastAPI(
         title="kb · 本地知识库",
@@ -247,8 +433,13 @@ def create_app(retriever: Any, answerer: Any = None, *,
     app.state.answerer = answerer
     app.state.raw_dir = raw_root
     app.state.editor = active_editor
+    # 一次算好；`/api/collections` / `/api/search` 只读这些缓存，不再碰磁盘
+    app.state.collections = collections
+    app.state.collection_names = collection_names
+    app.state.collection_dirs = collection_dirs
+    app.state.default_collections = defaults
     # 一次算好；`/api/stats` 只读这个缓存，不再碰磁盘
-    app.state.stats = _build_stats(retriever)
+    app.state.stats = _build_stats(retriever, collection_dirs)
 
     hit_cache: dict[str, dict] = {}
     meta_index: dict[str, dict] | None = None
@@ -285,11 +476,15 @@ def create_app(retriever: Any, answerer: Any = None, *,
             "chunk_id": str(data.get("chunk_id") or ""),
             "rank": int(data.get("rank") or fallback_rank),
             "score": float(data.get("score") or 0.0),
+            # 多集合：这条结果来自哪个集合。单索引老索引里可能是空串。
+            "collection": str(data.get("collection") or ""),
             "breadcrumb": str(data.get("breadcrumb") or ""),
             "repo": str(data.get("repo") or ""),
             "rel_path": str(data.get("rel_path") or ""),
             "line_start": int(data.get("line_start") or 0),
             "line_end": int(data.get("line_end") or 0),
+            # Markdown 是 L222-297，PDF 是 P3 / P3-4；老索引没有这个字段
+            "locator": str(data.get("locator") or ""),
             "text": (text[:TEXT_PREVIEW_CHARS] + "…") if truncated else text,
             "text_full": text if truncated else None,
             "text_chars": len(text),
@@ -297,6 +492,32 @@ def create_app(retriever: Any, answerer: Any = None, *,
             "source": str(data.get("source") or ""),
             "abs_path": str(path) if path is not None else None,
         }
+
+    def pick_collections(raw: list[str] | None) -> list[str]:
+        """`collections` 查询参数 -> 实际要查的集合名列表。
+
+        · 不传（或全是空串）-> `default_collections`
+        · `all`             -> 所有已加载的集合
+        · 有不存在名字      -> 400，detail 里列出可用集合（前端 chip 也可能过期）
+        """
+        names: list[str] = []
+        for group in raw or []:
+            for part in str(group or "").split(","):
+                part = part.strip()
+                if part and part not in names:
+                    names.append(part)
+        if not names:
+            return list(app.state.default_collections)
+        if any(name.lower() == "all" for name in names):
+            return list(collection_names)
+        missing = [name for name in names if name not in collection_names]
+        if missing:
+            available = "、".join(collection_names) or "(空)"
+            raise HTTPException(
+                status_code=400,
+                detail=f"不存在的集合：{', '.join(missing)}。可用集合：{available}",
+            )
+        return names
 
     # ------------------------------------------------------------- 路由
 
@@ -315,22 +536,36 @@ def create_app(retriever: Any, answerer: Any = None, *,
     def favicon() -> Response:
         return Response(status_code=204)
 
+    @app.get("/api/collections")
+    def api_collections() -> dict:
+        """集合列表 + 默认选中项。块数在 create_app 时就读好了，这里只抄缓存。"""
+        return {
+            "collections": [dict(entry) for entry in app.state.collections],
+            "default": list(app.state.default_collections),
+        }
+
     @app.get("/api/search")
     def api_search(
         q: str = Query("", description="查询词"),
         top_k: int = Query(10, ge=1, le=MAX_TOP_K, description="返回条数"),
         mode: str = Query("hybrid", description="hybrid / dense / sparse"),
+        collections: list[str] | None = Query(
+            None,
+            description="只查这些集合，逗号分隔、可重复；all=全部；不传用默认集合",
+        ),
     ) -> dict:
         query = (q or "").strip()
         if not query:
             raise HTTPException(status_code=400, detail="查询词 q 不能为空")
 
         use_dense, use_sparse = _mode_flags(mode)
+        selected = pick_collections(collections)
         started = time.perf_counter()
         try:
             hits = retriever.search(
                 query, top_k=top_k,
                 use_dense=use_dense, use_sparse=use_sparse,
+                collections=selected or None,
             )
         except (FileNotFoundError, RuntimeError, ValueError) as exc:
             raise HTTPException(status_code=500, detail=f"检索失败：{exc}") from exc
@@ -341,6 +576,7 @@ def create_app(retriever: Any, answerer: Any = None, *,
             "query": query,
             "mode": (mode or "hybrid").strip().lower(),
             "top_k": top_k,
+            "collections": selected,
             "elapsed_ms": elapsed_ms,
             "count": len(results),
             "results": results,
@@ -416,7 +652,10 @@ def create_app(retriever: Any, answerer: Any = None, *,
         info = getattr(retriever, "index_info", None) or {}
         recorded = str(info.get("embedder") or "")
         loaded_embedder = getattr(retriever, "embedder", None)
-        chunks = _count_chunks(retriever)
+        # 多集合时 `_count_chunks` 只看得到第一份索引，所以优先用集合块数之和
+        chunks = sum(entry["chunks"] for entry in app.state.collections)
+        if not chunks:
+            chunks = _count_chunks(retriever)
 
         model_dir = getattr(retriever, "model_dir", None)
         model_dir_exists = bool(model_dir) and Path(model_dir).is_dir()
@@ -433,6 +672,8 @@ def create_app(retriever: Any, answerer: Any = None, *,
             "ready": bool(index_ready and embedder_ready),
             "index_ready": index_ready,
             "chunks": chunks,
+            "collections": list(collection_names),
+            "n_collections": len(collection_names),
             "embedder": recorded or (type(loaded_embedder).__name__
                                      if loaded_embedder is not None else ""),
             "embedder_loaded": loaded_embedder is not None,
@@ -452,6 +693,10 @@ def create_app(retriever: Any, answerer: Any = None, *,
         stats = getattr(app.state, "stats", None) or {}
         body = dict(stats)
         body["repos"] = [dict(repo) for repo in body.get("repos") or []]
+        body["collections"] = [
+            {**entry, "repos": [dict(repo) for repo in entry.get("repos") or []]}
+            for entry in body.get("collections") or []
+        ]
         return body
 
     return app

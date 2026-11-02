@@ -32,6 +32,20 @@
     --shadow: 0 8px 28px rgba(15, 23, 42, .14);
     --toast-bg: #1f2328;
     --toast-text: #ffffff;
+    /* 集合徽标配色。已知集合各占一个色相，其它集合按名字散列到 tone-*；
+       深色模式在下面重新定义同一批变量，规则本身不用改。 */
+    --coll-tech: #1d4ed8;
+    --coll-tech-bg: #e6efff;
+    --coll-papers: #7c3aed;
+    --coll-papers-bg: #f0e9ff;
+    --coll-profile: #b45309;
+    --coll-profile-bg: #fff2e0;
+    --coll-other: #475569;
+    --coll-other-bg: #eef1f5;
+    --coll-tone-1: #0f766e; --coll-tone-1-bg: #e0f5f2;
+    --coll-tone-2: #a21caf; --coll-tone-2-bg: #fbe8fd;
+    --coll-tone-3: #b91c1c; --coll-tone-3-bg: #fdeaea;
+    --coll-tone-4: #4d7c0f; --coll-tone-4-bg: #eef7dc;
   }
   :root[data-theme="dark"] {
     color-scheme: dark;
@@ -58,6 +72,18 @@
     --shadow: 0 8px 28px rgba(0, 0, 0, .5);
     --toast-bg: #e6e9ee;
     --toast-text: #161a20;
+    --coll-tech: #93b4ff;
+    --coll-tech-bg: #1b2740;
+    --coll-papers: #c9a7ff;
+    --coll-papers-bg: #2a2036;
+    --coll-profile: #f0b46b;
+    --coll-profile-bg: #3a2a17;
+    --coll-other: #b6c2d2;
+    --coll-other-bg: #222833;
+    --coll-tone-1: #7fe0d3; --coll-tone-1-bg: #122e2b;
+    --coll-tone-2: #e9b0ee; --coll-tone-2-bg: #33203a;
+    --coll-tone-3: #ff9b93; --coll-tone-3-bg: #35191a;
+    --coll-tone-4: #bcd98a; --coll-tone-4-bg: #232d15;
   }
 
   * { box-sizing: border-box; }
@@ -233,6 +259,55 @@
     margin-left: auto; color: var(--muted); font-size: 12px;
     font-variant-numeric: tabular-nums; white-space: nowrap;
   }
+
+  /* ---------- 集合选择（请求侧过滤） ---------- */
+  .collection-bar {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin: 0 0 12px;
+  }
+  .collection-bar-label { font-size: 12px; color: var(--muted); }
+  .collection-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .collection-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 28px; padding: 0 11px;
+    border: 1px solid var(--border); border-radius: 14px;
+    background: var(--panel); color: var(--muted);
+    font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .collection-chip:hover { border-color: var(--coll-color); color: var(--coll-color); }
+  .collection-chip.active {
+    border-color: var(--coll-color);
+    background: var(--coll-bg);
+    color: var(--coll-color);
+    font-weight: 600;
+  }
+  .collection-hint { font-size: 12px; color: var(--muted); }
+
+  /* ---------- 集合徽标：每个结果卡片一个，颜色由集合决定 ---------- */
+  .collection-badge, .collection-chip {
+    --coll-color: var(--coll-other);
+    --coll-bg: var(--coll-other-bg);
+  }
+  .coll-tech { --coll-color: var(--coll-tech); --coll-bg: var(--coll-tech-bg); }
+  .coll-papers { --coll-color: var(--coll-papers); --coll-bg: var(--coll-papers-bg); }
+  .coll-profile { --coll-color: var(--coll-profile); --coll-bg: var(--coll-profile-bg); }
+  .tone-0 { --coll-color: var(--coll-tone-1); --coll-bg: var(--coll-tone-1-bg); }
+  .tone-1 { --coll-color: var(--coll-tone-2); --coll-bg: var(--coll-tone-2-bg); }
+  .tone-2 { --coll-color: var(--coll-tone-3); --coll-bg: var(--coll-tone-3-bg); }
+  .tone-3 { --coll-color: var(--coll-tone-4); --coll-bg: var(--coll-tone-4-bg); }
+  .collection-badge {
+    display: inline-flex; align-items: center;
+    height: 20px; padding: 0 8px; flex: none;
+    border: 1px solid var(--coll-color); border-radius: 10px;
+    background: var(--coll-bg); color: var(--coll-color);
+    font-size: 11px; font-weight: 600; letter-spacing: .2px;
+    white-space: nowrap;
+  }
+  .crumb-row {
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+    margin: 8px 0 6px;
+  }
+  .crumb-row .crumb { margin: 0; }
 
   /* ---------- 结果卡片 ---------- */
   .card {
@@ -445,6 +520,12 @@
 
     <section id="answer-panel" class="answer hidden" aria-live="polite"></section>
 
+    <section id="collection-filters" class="collection-bar hidden" aria-label="集合选择">
+      <span class="collection-bar-label">集合</span>
+      <div id="collection-chips" class="collection-chips"></div>
+      <span id="collection-hint" class="collection-hint"></span>
+    </section>
+
     <section id="filters" class="filters hidden" aria-label="仓库筛选">
       <div id="filter-chips" class="filter-chips"></div>
       <div id="filter-summary" class="filter-summary"></div>
@@ -473,6 +554,9 @@
 
 <div id="toast" class="hidden"></div>
 
+<!-- 结果卡片上的集合徽标模板：JS 克隆它，颜色由 class（coll-tech / tone-N）决定 -->
+<template id="collection-badge-tpl"><span class="collection-badge"></span></template>
+
 <script>
 (function () {
   'use strict';
@@ -483,6 +567,7 @@
 
   var HISTORY_KEY = 'kb.searchHistory';
   var THEME_KEY = 'kb.theme';
+  var COLLECTION_KEY = 'kb.collections';
   var HISTORY_LIMIT = 20;
   var THEMES = ['auto', 'light', 'dark'];        // 循环顺序：auto -> light -> dark
   var THEME_LABEL = { auto: '自动', light: '浅色', dark: '深色' };
@@ -511,6 +596,10 @@
     visible: [],             // 过滤后实际渲染的结果
     repos: [],               // [{name, count}]
     activeRepos: {},         // 选中的仓库名集合；空对象 = 不过滤
+    collections: [],         // /api/collections 的集合列表 [{name, chunks, has_index}]
+    defaultCollections: [],  // 服务端给的默认集合
+    activeCollections: [],   // 选中的集合名；影响请求，不参与结果过滤
+    collectionsLoaded: false,
     terms: [],               // 高亮词
     selected: -1,            // 键盘选中的结果下标
     historyOpen: false,
@@ -859,11 +948,15 @@
    * ================================================================ */
 
   function readUrlState() {
-    var result = { q: '', mode: 'search' };
+    var result = { q: '', mode: 'search', collections: [] };
     try {
       var params = new URLSearchParams(window.location.search);
       result.q = (params.get('q') || '').trim();
       result.mode = params.get('mode') === 'ask' ? 'ask' : 'search';
+      result.collections = (params.get('collections') || '')
+        .split(',')
+        .map(function (name) { return name.trim(); })
+        .filter(function (name) { return !!name; });
     } catch (err) { /* 老浏览器不支持 URLSearchParams 时按空状态处理 */ }
     return result;
   }
@@ -873,6 +966,10 @@
       var url = new URL(window.location.href);
       url.searchParams.set('q', query);
       url.searchParams.set('mode', mode);
+      // 集合也进 URL，刷新后能恢复同一组索引
+      var names = state.activeCollections.filter(function (name) { return !!name; });
+      if (names.length) url.searchParams.set('collections', names.join(','));
+      else url.searchParams.delete('collections');
       // replaceState：连续搜索不会塞满浏览器的后退栈
       window.history.replaceState(null, '', url.pathname + url.search + url.hash);
     } catch (err) { /* file:// 等场景下同步失败不影响搜索 */ }
@@ -971,6 +1068,168 @@
   }
 
   /* ================================================================
+   *  集合（collection）
+   *
+   *  两层过滤，互不干扰：
+   *    · 集合 chip —— 决定**请求**查哪些索引（拼进 ?collections=...）；
+   *    · 仓库 chip —— 只对**本次已返回的结果**做前端筛选，不再发请求。
+   *  所以切集合要重发请求并清空仓库筛选（结果集变了，旧筛选没有意义），
+   *  而切仓库只在本地重排。
+   *
+   *  选择状态存 localStorage['kb.collections']（JSON 数组）。存的集合名可能
+   *  来自上一次的配置（集合被删了 / 改名了），加载时按 /api/collections
+   *  过滤一遍，对不上就忽略。
+   * ================================================================ */
+
+  function collectionDisplay(name) { return name || '默认'; }
+
+  function knownCollection(name) {
+    return state.collections.some(function (item) { return item.name === name; });
+  }
+
+  /** 集合 -> 颜色 class。已知集合各有专属色，其它按名字散列到 tone-0..3。 */
+  function collectionTone(name) {
+    var key = String(name || '');
+    if (key === 'tech' || key === 'papers' || key === 'profile') return 'coll-' + key;
+    var hash = 0;
+    for (var i = 0; i < key.length; i++) {
+      hash = (hash * 31 + key.charCodeAt(i)) % 9973;
+    }
+    return 'tone-' + (hash % 4);
+  }
+
+  function loadStoredCollections() {
+    var raw = storageGet(COLLECTION_KEY);
+    if (!raw) return [];
+    var parsed;
+    try { parsed = JSON.parse(raw); } catch (err) { return []; }
+    if (!Array.isArray(parsed)) return [];
+    var seen = {};
+    return parsed.filter(function (name) {
+      if (typeof name !== 'string' || !name) return false;
+      if (seen[name] || !knownCollection(name)) return false;
+      seen[name] = true;
+      return true;
+    });
+  }
+
+  function saveCollections() {
+    storageSet(COLLECTION_KEY, JSON.stringify(state.activeCollections));
+  }
+
+  /** 初始选中：本地存的有效值 > 服务端默认 > 全部。 */
+  function defaultActiveCollections() {
+    var stored = loadStoredCollections();
+    if (stored.length) return stored;
+    var defaults = (state.defaultCollections || []).filter(knownCollection);
+    if (defaults.length) return defaults;
+    return state.collections.map(function (item) { return item.name; });
+  }
+
+  /** 拼进请求的 collections 参数：一个都没选时退回 all（后端展开成全部）。 */
+  function collectionQuery() {
+    var names = state.activeCollections.filter(function (name) {
+      return typeof name === 'string' && name !== '';
+    });
+    return names.length ? names.join(',') : 'all';
+  }
+
+  function renderCollectionChips() {
+    var wrap = $('collection-filters');
+    var chips = $('collection-chips');
+    if (!wrap || !chips) return;
+    chips.replaceChildren();
+
+    var hint = $('collection-hint');
+    if (hint) {
+      hint.textContent = state.mode === 'ask' ? '问答模式目前按全部集合检索' : '';
+    }
+    if (!state.collections.length) {
+      wrap.classList.add('hidden');
+      return;
+    }
+
+    state.collections.forEach(function (item) {
+      var active = state.activeCollections.indexOf(item.name) >= 0;
+      var chip = el('button', 'collection-chip ' + collectionTone(item.name));
+      chip.type = 'button';
+      chip.setAttribute('data-collection', item.name);
+      chip.classList.toggle('active', active);
+      chip.setAttribute('aria-pressed', active ? 'true' : 'false');
+      chip.title = collectionDisplay(item.name) + ' · ' + fmtInt(item.chunks) + ' 块'
+        + (item.has_index ? '' : '（还没有索引）')
+        + (active ? '（点击取消）' : '（点击只看这个集合）');
+      chip.appendChild(el('span', null, collectionDisplay(item.name)));
+      chip.appendChild(el('span', 'filter-count', fmtInt(item.chunks)));
+      chip.addEventListener('click', function () { toggleCollection(item.name); });
+      chips.appendChild(chip);
+    });
+    wrap.classList.remove('hidden');
+  }
+
+  function toggleCollection(name) {
+    var active = state.activeCollections.slice();
+    var at = active.indexOf(name);
+    if (at >= 0) {
+      if (active.length === 1) {
+        // 一个都不选等于没有可查的索引，后端会 400；这里直接挡住
+        toast('至少要保留一个集合', true);
+        return;
+      }
+      active.splice(at, 1);
+    } else {
+      active.push(name);
+    }
+    state.activeCollections = active;
+    saveCollections();
+    // 结果集会变，旧的仓库筛选立刻失效
+    state.activeRepos = {};
+    renderCollectionChips();
+    renderFilters();
+
+    if (state.busy) return;
+    if (state.mode === 'search' && state.lastQuery) {
+      run();                       // 有上一次检索就按新集合重查
+    } else if (state.results.length) {
+      renderResults();
+    }
+  }
+
+  /** 用 URL 里的集合覆盖选择；没有有效名字时保持原样。 */
+  function applyCollections(names) {
+    var wanted = (names || []).filter(knownCollection);
+    if (!wanted.length) return false;
+    state.activeCollections = wanted;
+    saveCollections();
+    renderCollectionChips();
+    return true;
+  }
+
+  async function loadCollections() {
+    try {
+      var data = await api('/api/collections');
+      state.collections = (data.collections || []).filter(function (item) {
+        return !!item && typeof item.name === 'string';
+      }).map(function (item) {
+        return {
+          name: item.name,
+          chunks: Number(item.chunks) || 0,
+          has_index: item.has_index !== false
+        };
+      });
+      state.defaultCollections = Array.isArray(data.default) ? data.default : [];
+    } catch (err) {
+      state.collections = [];
+      state.defaultCollections = [];
+      toast('集合列表加载失败：' + (err && err.message ? err.message : err), true);
+    }
+    state.collectionsLoaded = true;
+    state.activeCollections = defaultActiveCollections();
+    renderCollectionChips();
+    renderStatus();
+  }
+
+  /* ================================================================
    *  仓库聚合与筛选
    * ================================================================ */
 
@@ -1057,6 +1316,8 @@
 
   function locationOf(item) {
     var text = (item.repo ? item.repo + '/' : '') + item.rel_path;
+    // PDF 的 locator 是 P3 / P3-4，Markdown 没有 locator 时退回行号
+    if (item.locator) return text + ':' + item.locator;
     if (item.line_start) text += ':' + item.line_start + '-' + item.line_end;
     return text;
   }
@@ -1068,17 +1329,33 @@
       chunk_id: String(raw.chunk_id || ''),
       rank: Number(raw.rank) || 0,
       score: Number(raw.score) || 0,
+      collection: String(raw.collection || ''),
       breadcrumb: String(raw.breadcrumb || ''),
       repo: String(raw.repo || ''),
       rel_path: String(raw.rel_path || ''),
       line_start: Number(raw.line_start) || 0,
       line_end: Number(raw.line_end) || 0,
+      locator: String(raw.locator || ''),
       text: text,
       text_full: full,
       text_chars: Number(raw.text_chars) || (full || text).length,
       truncated: !!raw.truncated || !!full,
       abs_path: raw.abs_path ? String(raw.abs_path) : null
     };
+  }
+
+  /** 结果卡片左上角的集合徽标：克隆 HTML 里的 <template>，颜色按集合区分。 */
+  function collectionBadge(name) {
+    var tpl = $('collection-badge-tpl');
+    var badge = (tpl && tpl.content && tpl.content.firstElementChild)
+      ? tpl.content.firstElementChild.cloneNode(true)
+      : el('span', 'collection-badge');
+    var key = String(name || '');
+    badge.textContent = collectionDisplay(key);
+    badge.setAttribute('data-collection', key);
+    badge.classList.add(collectionTone(key));
+    badge.title = '来源集合：' + collectionDisplay(key);
+    return badge;
   }
 
   function renderCard(item, displayRank) {
@@ -1091,7 +1368,11 @@
     head.appendChild(el('span', 'location', locationOf(item)));
     card.appendChild(head);
 
-    card.appendChild(el('h2', 'crumb', item.breadcrumb || '(无标题)'));
+    // breadcrumb 前的小徽标：这条结果来自哪个集合
+    var crumbRow = el('div', 'crumb-row');
+    crumbRow.appendChild(collectionBadge(item.collection));
+    crumbRow.appendChild(el('h2', 'crumb', item.breadcrumb || '(无标题)'));
+    card.appendChild(crumbRow);
 
     var body = el('div', 'snippet');
     if (item.text) {
@@ -1258,8 +1539,10 @@
    * ================================================================ */
 
   async function search(query) {
+    // 集合是请求侧参数：切了集合就换了索引，结果集完全不同
     var data = await api('/api/search?q=' + encodeURIComponent(query) +
-      '&top_k=' + RESULT_TOP_K + '&mode=hybrid');
+      '&top_k=' + RESULT_TOP_K + '&mode=hybrid' +
+      '&collections=' + encodeURIComponent(collectionQuery()));
     state.lastServerMs = typeof data.elapsed_ms === 'number' ? data.elapsed_ms : null;
     state.terms = splitTerms(query);
     state.results = (data.results || []).map(normalizeResult);
@@ -1271,7 +1554,7 @@
       hide('filters');
       showEmpty('没有找到与「' + query + '」相关的内容', [
         '换个关键词，或把长句拆成几个词',
-        '去掉筛选条件（如果之前选过仓库）',
+        '去掉筛选条件（如果之前选过仓库或集合）',
         '试试问答模式，让模型基于检索结果作答'
       ]);
       return;
@@ -1427,6 +1710,12 @@
         state.healthError ? 'bad' : ''));
     } else {
       bar.appendChild(statusChip('块数 ' + fmtInt(health.chunks)));
+      if (typeof health.n_collections === 'number' || Array.isArray(health.collections)) {
+        var count = typeof health.n_collections === 'number'
+          ? health.n_collections
+          : (health.collections || []).length;
+        bar.appendChild(statusChip('集合 ' + count + ' 个'));
+      }
       bar.appendChild(statusChip('embedder ' + (health.embedder || '未知')));
       bar.appendChild(statusChip(health.ready ? '就绪' : '未就绪', health.ready ? 'ok' : 'bad'));
       bar.appendChild(statusChip(health.answerer ? '问答已启用' : '问答未启用',
@@ -1463,50 +1752,73 @@
     return !!panel && !panel.classList.contains('hidden');
   }
 
+  function statsPair(grid, label, value, asCode) {
+    grid.appendChild(el('dt', null, label));
+    var dd = el('dd');
+    if (asCode) dd.appendChild(el('code', null, value));
+    else dd.textContent = value == null ? '-' : String(value);
+    grid.appendChild(dd);
+  }
+
+  function renderRepoTable(body, repos, total, subtitle) {
+    if (!repos || !repos.length) return;
+    body.appendChild(el('h3', 'stats-subtitle', subtitle));
+    var table = el('table', 'stats-table');
+    var thead = el('thead');
+    var headRow = el('tr');
+    headRow.appendChild(el('th', null, '仓库'));
+    headRow.appendChild(el('th', 'num', '块数'));
+    headRow.appendChild(el('th', 'num', '占比'));
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    var tbody = el('tbody');
+    repos.forEach(function (repo) {
+      var row = el('tr');
+      row.appendChild(el('td', null, repo.name || UNKNOWN_REPO));
+      row.appendChild(el('td', 'num', fmtInt(repo.chunks)));
+      var percent = total ? (repo.chunks / total * 100) : 0;
+      row.appendChild(el('td', 'num', percent.toFixed(1) + '%'));
+      tbody.appendChild(row);
+    });
+    table.appendChild(tbody);
+    body.appendChild(table);
+  }
+
   function renderStats(data) {
     var body = $('stats-body');
     if (!body) return;
     body.replaceChildren();
 
+    // 顶部是所有集合的汇总
     var grid = el('dl', 'stats-grid');
-    function pair(label, value, asCode) {
-      grid.appendChild(el('dt', null, label));
-      var dd = el('dd');
-      if (asCode) dd.appendChild(el('code', null, value));
-      else dd.textContent = value == null ? '-' : String(value);
-      grid.appendChild(dd);
-    }
-    pair('块数', fmtInt(data.chunks));
-    pair('仓库', (data.repos || []).length + ' 个');
-    pair('平均字符数', fmtInt(data.avg_chars) + ' 字符/块');
-    pair('索引大小', fmtMb(data.index_size_mb));
-    pair('索引目录', data.index_dir || '(未知)', true);
+    var groups = Array.isArray(data.collections) ? data.collections : [];
+    statsPair(grid, '块数', fmtInt(data.chunks));
+    statsPair(grid, '集合', groups.length + ' 个');
+    statsPair(grid, '平均字符数', fmtInt(data.avg_chars) + ' 字符/块');
+    statsPair(grid, '索引大小', fmtMb(data.index_size_mb));
+    statsPair(grid, '索引目录', data.index_dir || '(未知)', true);
     body.appendChild(grid);
 
-    var repos = data.repos || [];
-    if (repos.length) {
-      body.appendChild(el('h3', 'stats-subtitle', '各仓库块数'));
-      var table = el('table', 'stats-table');
-      var thead = el('thead');
-      var headRow = el('tr');
-      headRow.appendChild(el('th', null, '仓库'));
-      headRow.appendChild(el('th', 'num', '块数'));
-      headRow.appendChild(el('th', 'num', '占比'));
-      thead.appendChild(headRow);
-      table.appendChild(thead);
-
-      var tbody = el('tbody');
-      repos.forEach(function (repo) {
-        var row = el('tr');
-        row.appendChild(el('td', null, repo.name || UNKNOWN_REPO));
-        row.appendChild(el('td', 'num', fmtInt(repo.chunks)));
-        var percent = data.chunks ? (repo.chunks / data.chunks * 100) : 0;
-        row.appendChild(el('td', 'num', percent.toFixed(1) + '%'));
-        tbody.appendChild(row);
-      });
-      table.appendChild(tbody);
-      body.appendChild(table);
+    if (!groups.length) {
+      // 旧后端没有 collections 字段时保持原来的单块渲染
+      renderRepoTable(body, data.repos, data.chunks, '各仓库块数');
+      return;
     }
+
+    // 每个集合一块：块数 / 平均字符 / 索引大小 / 各仓库分布
+    groups.forEach(function (group) {
+      var name = collectionDisplay(group.name);
+      body.appendChild(el('h3', 'stats-subtitle',
+        '集合 ' + name + ' · ' + fmtInt(group.chunks) + ' 块'));
+      var detail = el('dl', 'stats-grid');
+      statsPair(detail, '平均字符数', fmtInt(group.avg_chars) + ' 字符/块');
+      statsPair(detail, '索引大小', fmtMb(group.index_size_mb));
+      statsPair(detail, '索引目录', group.index_dir || '(未知)', true);
+      body.appendChild(detail);
+      renderRepoTable(body, group.repos, group.chunks,
+        '集合 ' + name + ' 的各仓库块数');
+    });
   }
 
   function openStats() {
@@ -1673,6 +1985,8 @@
         ? '输入关键词…'
         : '输入问题，例如：RAG 是什么';
     }
+    // 问答模式不支持按集合过滤，提示文案跟着模式走
+    renderCollectionChips();
   }
 
   function setMode(mode) {
@@ -1767,15 +2081,20 @@
     document.addEventListener('mousedown', onDocumentMousedown);
   }
 
-  function boot() {
+  async function boot() {
     state.theme = loadTheme();
     applyTheme();
     watchSystemTheme();
     bindEvents();
     loadHealth();
+    // 集合列表要先拿到：chip 的默认选中和「存的集合还在不在」都靠它
+    await loadCollections();
 
     var input = $('query-input');
     var initial = readUrlState();
+    if (initial.collections && initial.collections.length) {
+      applyCollections(initial.collections);   // 刷新 / 分享链接能恢复集合选择
+    }
     if (initial.q) {
       if (input) input.value = initial.q;
       applyMode(initial.mode);

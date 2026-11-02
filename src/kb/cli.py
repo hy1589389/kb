@@ -414,6 +414,85 @@ def _resolve_search_indexes(args: argparse.Namespace, cfg: IngestConfig):
     return index_map, labels, selected, weights
 
 
+def _read_index_meta(index_dir: Path) -> dict:
+    """读 `index_meta.json`；读不出来 / 不是 JSON 对象时返回 {}（当作没索引）。"""
+    try:
+        data = json.loads(
+            (Path(index_dir) / "index_meta.json").read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _resolve_web_indexes(args: argparse.Namespace, cfg: IngestConfig) -> dict:
+    """Web 服务启动计划：加载哪些索引、默认查哪些集合、各自多少块。
+
+    两种模式：
+
+    · `--index-dir` 显式给出：**单集合兼容模式**。集合名取
+      `[collections].default_search` 的第一个（没有就用空串），块数从该目录的
+      `index_meta.json` 读。老命令行 `web --index-dir <dir>` 的行为不变。
+    · 不给 `--index-dir`：**多集合模式**。遍历 `[collections]` 里的所有集合，
+      谁的 `index_dir` 下有 `index_meta.json` 就加载谁；没有索引的记进
+      `skipped`，由调用方打印一行提示后跳过，不整体失败。一个都没有才抛错。
+
+    `default` 是 `/api/search` 不传 `collections` 时用的集合：先按
+    `default_search` 的顺序取有索引的那些，一个都对不上就退回全部有索引的。
+    """
+    if getattr(args, "index_dir", None):
+        path = Path(args.index_dir).resolve()
+        info = _read_index_meta(path)
+        if not info:
+            raise FileNotFoundError(
+                f"{path / 'index_meta.json'} 读不出来，索引可能不完整，请重建。"
+            )
+        names = (_split_names(getattr(args, "collection", None))
+                 or list(cfg.collections.default_search))
+        primary = names[0] if names else ""
+        return {
+            "single": True,
+            "index_map": {primary: path},
+            "weights": {primary: 1.0},
+            "default": [primary],
+            "chunks": {primary: int(info.get("n_chunks") or 0)},
+            "skipped": [],
+        }
+
+    selected = cfg.collections.select(cfg.collections.names())
+    index_map: dict[str, Path] = {}
+    chunks: dict[str, int] = {}
+    skipped: list[str] = []
+    for coll in selected:
+        info = _read_index_meta(coll.index_dir)
+        if not info:
+            skipped.append(coll.name)
+            continue
+        index_map[coll.name] = coll.index_dir
+        chunks[coll.name] = int(info.get("n_chunks") or 0)
+
+    if not index_map:
+        hint = selected[0].name if selected else "tech"
+        raise FileNotFoundError(
+            f"所有集合都还没有索引（{', '.join(c.name for c in selected) or '空'}）。\n"
+            f"    先入库再建索引：\n"
+            f"        python ingest.py ingest --collection {hint}\n"
+            f"        python ingest.py index  --collection {hint}"
+        )
+
+    defaults = [name for name in cfg.collections.default_search if name in index_map]
+    weights = {coll.name: float(coll.weight)
+               for coll in selected if coll.name in index_map}
+    return {
+        "single": False,
+        "index_map": index_map,
+        "weights": weights,
+        "default": defaults or list(index_map),
+        "chunks": chunks,
+        "skipped": skipped,
+    }
+
+
 def _read_manifest(cfg: IngestConfig, collection: str) -> list[dict]:
     path = Path(cfg.out_dir) / f"manifest_{collection}.jsonl"
     if not path.exists():
@@ -897,6 +976,11 @@ def cmd_web(args: argparse.Namespace) -> int:
     BM25」。启动时先跑一次预热检索，把模型首帧和分词器初始化的开销提前
     付掉，第一个用户请求不用等 70 秒。
 
+    **多集合**：不给 `--index-dir` 时按 `config.toml` 的 `[collections]` 发现
+    索引，每个有 `index_meta.json` 的集合都加载进来（一个 `Retriever`，内部
+    各自 dense/BM25 + 跨集合 RRF）。给了 `--index-dir` 就退化成一个集合，
+    保持旧命令行可用。所有集合都没有索引时才报错退出。
+
     没有 API key 也能启动：`/api/search` 正常，`/api/ask` 返回 503。
     """
     import threading
@@ -916,20 +1000,24 @@ def cmd_web(args: argparse.Namespace) -> int:
     from .web.editor import detect_editor
 
     rc = _load_retrieval_config(args)
-    web_cfg = _load_ingest_config(args).web
+    ingest_cfg = _load_ingest_config(args)
+    web_cfg = ingest_cfg.web
+    # [collections] 里的相对路径要按项目根展开，否则 cwd 一变就找不到索引
+    ingest_cfg.resolve(PROJECT_ROOT)
 
-    index_dir = rc.index_dir
-    if not index_dir.exists():
-        print(f"[X] 索引目录不存在：{index_dir}")
-        print("    先建索引：python ingest.py index --chunks <chunks.jsonl>")
-        return 2
     try:
-        index_info = json.loads(
-            (index_dir / "index_meta.json").read_text(encoding="utf-8")
-        )
-    except (OSError, ValueError):
-        print(f"[X] {index_dir / 'index_meta.json'} 读不出来，索引可能不完整，请重建。")
+        plan = _resolve_web_indexes(args, ingest_cfg)
+    except (FileNotFoundError, KeyError, ValueError) as exc:
+        print(f"[X] {exc.args[0] if exc.args else exc}")
         return 2
+
+    # 没建索引的集合只提示、不退出：服务起来查有索引的那些，前端 chip 里也就
+    # 不会出现一个点了必然 400 的集合。
+    for name in plan["skipped"]:
+        print(f"[!] 集合 {name} 还没有索引，已跳过"
+              f"（python ingest.py index --collection {name}）")
+
+    index_map: dict[str, Path] = plan["index_map"]
 
     host = (args.host or web_cfg.host or "127.0.0.1").strip()
     port = int(args.port if args.port is not None else web_cfg.port)
@@ -940,17 +1028,31 @@ def cmd_web(args: argparse.Namespace) -> int:
     display_host = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
     url = f"http://{display_host}:{port}"
 
+    # embedder 类型必须和建索引时一致。多集合要求所有索引是同一种，这里看
+    # 第一个 hashing 的：全是 onnx 就交给 Retriever 懒加载（省一次模型加载）。
     embedder = None
-    if "hashing" in str(index_info.get("embedder", "")).lower():
-        embedder = HashingEmbedder(dim=int(index_info.get("dim", 512)))
+    for directory in index_map.values():
+        info = _read_index_meta(directory)
+        if "hashing" in str(info.get("embedder", "")).lower():
+            embedder = HashingEmbedder(dim=int(info.get("dim", 512)))
+            break
 
-    n_chunks = index_info.get("n_chunks")
     print("=" * 68)
     print("  Phase 5 · 本地 Web 界面")
     print("=" * 68)
     print(f"  地址     : {url}")
-    print(f"  索引     : {index_dir}"
-          + (f"  ({_fmt(int(n_chunks))} 块)" if n_chunks else ""))
+    print(f"  集合     : " + " | ".join(
+        f"{name} ({_fmt(int(chunks))} 块)"
+        for name, chunks in plan["chunks"].items()
+    ))
+    if plan["single"]:
+        print(f"  索引     : {next(iter(index_map.values()))}")
+    else:
+        lines = [f"{name} -> {path}" for name, path in index_map.items()]
+        print(f"  索引     : {lines[0]}")
+        for line in lines[1:]:
+            print(f"             {line}")
+    print(f"  默认集合 : {', '.join(plan['default'])}")
     print(f"  模型     : {rc.model_dir}")
     print(f"  语料     : {raw_dir}"
           + ("" if raw_dir.exists() else "   [!] 目录不存在，/api/open 会打不开文件"))
@@ -959,10 +1061,14 @@ def cmd_web(args: argparse.Namespace) -> int:
     print("  正在加载索引（一次性，之后每个请求复用）...")
     sys.stdout.flush()
 
+    # 多集合的权重走 cfg["collections"]，其余键照抄 [retrieval]
+    cfg = rc.to_retriever_cfg()
+    if plan["weights"]:
+        cfg["collections"] = dict(plan["weights"])
+
     started = time.perf_counter()
     try:
-        retriever = Retriever(index_dir, embedder=embedder,
-                              cfg=rc.to_retriever_cfg())
+        retriever = Retriever(index_map, embedder=embedder, cfg=cfg)
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         print(f"[X] {exc}")
         return 2
@@ -971,6 +1077,8 @@ def cmd_web(args: argparse.Namespace) -> int:
 
     warmed = time.perf_counter()
     try:
+        # 预热只跑一次，且不传 collections：所有集合一起查，顺带把每条链路的
+        # 首次编码、BM25 打分都走一遍
         retriever.search("预热", top_k=1)
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         print(f"[X] 模型预热失败：{exc}")
@@ -1005,7 +1113,8 @@ def cmd_web(args: argparse.Namespace) -> int:
     print(f"  问答     : {answer_state}")
     print("-" * 68)
 
-    app = create_app(retriever, answerer, raw_dir=raw_dir, editor=editor)
+    app = create_app(retriever, answerer, raw_dir=raw_dir, editor=editor,
+                     default_collections=plan["default"])
     print(f"  打开 {url}    （Ctrl+C 停止服务）")
     print("=" * 68)
     # uvicorn 启动后 stdout 会被它接管（日志走自己的 handler），这里先冲干净：
@@ -1137,7 +1246,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_web.add_argument("--config", help="config.toml 路径（默认项目根目录下）")
     p_web.add_argument("--host", help="监听地址（默认取 [web].host，127.0.0.1）")
     p_web.add_argument("--port", type=int, help="端口（默认取 [web].port，8000）")
-    p_web.add_argument("--index-dir", dest="index_dir", help="索引目录")
+    p_web.add_argument("--index-dir", dest="index_dir",
+                       help="单集合模式的索引目录（给了它就忽略 [collections]，"
+                            "只加载这一个；不给则按 [collections] 自动发现所有集合）")
     p_web.add_argument("--model-dir", dest="model_dir", help="bge-m3 ONNX 目录")
     p_web.add_argument("--raw-dir", dest="raw_dir",
                        help="语料根目录（默认取 [path].raw_dir），/api/open 用它拼路径")

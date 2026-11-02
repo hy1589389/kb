@@ -16,6 +16,11 @@
   · 编辑器不存在         —— 要返回 (False, 说明)，不能让 CLI 崩
   · retriever 只构造一次 —— 这是整个 Web 模式的性能前提
   · /api/open 未知 id    —— 404，而不是 500 或者悄悄打开别的文件
+  · 集合列表 / 默认集合   —— 块数取自各索引的 index_meta.json，且只在启动时读一次
+  · ?collections= 参数    —— 不传用默认、all 查全部、不存在的名字 400 并列出可用集合
+  · /api/stats 按集合分组 —— 旧顶层字段必须还在（只增不减）
+  · cmd_web 的索引发现     —— 没索引的集合跳过、全都没有才报错、--index-dir 退化成单集合
+  · 前端集合 chip / 徽标   —— 没有构建工具，id、localStorage、请求参数只能静态检查
 """
 
 from __future__ import annotations
@@ -46,6 +51,7 @@ from kb.retrieve.types import SearchHit  # noqa: E402
 from kb.web import app as web_app  # noqa: E402
 from kb.web.app import create_app  # noqa: E402
 from kb.web.editor import detect_editor, open_in_editor, resolve_source_path  # noqa: E402
+from kb.cli import _load_ingest_config, _resolve_web_indexes, build_parser  # noqa: E402
 
 TMP_ROOT = ROOT / ".tmp"
 
@@ -58,7 +64,8 @@ HIT_TEXT = (
 def make_hit(index: int = 1, *, repo: str = "JavaGuide",
              rel_path: str = "docs/hashmap.md", line_start: int = 12,
              line_end: int = 40, text: str | None = None,
-             score: float = 0.03) -> SearchHit:
+             score: float = 0.03, collection: str = "",
+             locator: str = "") -> SearchHit:
     """构造一条检索结果，repo/rel_path/行号都与临时语料目录对得上。"""
     return SearchHit(
         chunk_id=f"chunk-{index}",
@@ -72,6 +79,8 @@ def make_hit(index: int = 1, *, repo: str = "JavaGuide",
         score=score,
         source="hybrid",
         rank=index,
+        collection=collection,
+        locator=locator,
     )
 
 
@@ -98,15 +107,26 @@ class FakeRetriever:
     """鸭子类型的检索器：记录调用参数，返回预设结果。
 
     `created` 是类变量，用来断言「整个进程只构造了一次」。
+
+    `index_dirs` 模拟多索引的 `Retriever.index_dirs`（`{集合名: 索引目录}`）；
+    不传就不设这个属性，`create_app` 会退回 `index_dir` 的单集合路径。
     """
 
     created = 0
 
-    def __init__(self, hits: list[SearchHit]):
+    def __init__(self, hits: list[SearchHit], *,
+                 index_dirs: dict[str, str | Path] | None = None):
         type(self).created += 1
         self.hits = list(hits)
         self.calls: list[dict] = []
         self.index_dir = str(TMP_ROOT / "index")
+        if index_dirs is not None:
+            self.index_dirs = {
+                str(name): Path(path) for name, path in index_dirs.items()
+            }
+            first = next(iter(self.index_dirs.values()), None)
+            if first is not None:
+                self.index_dir = str(first)
         self.index_info = {
             "n_chunks": len(self.hits),
             "dim": 1024,
@@ -118,15 +138,27 @@ class FakeRetriever:
         self.meta = [h.to_dict() for h in self.hits]
 
     def search(self, query: str, top_k: int = 10, *, use_dense: bool = True,
-               use_sparse: bool = True, use_rerank: bool = False):
+               use_sparse: bool = True, use_rerank: bool = False,
+               collections: list[str] | str | None = None):
+        names = None
+        if collections is not None:
+            names = ([x.strip() for x in collections.split(",")]
+                     if isinstance(collections, str)
+                     else [str(x).strip() for x in collections])
+            names = [x for x in names if x] or None
         self.calls.append({
             "query": query,
             "top_k": top_k,
             "use_dense": use_dense,
             "use_sparse": use_sparse,
             "use_rerank": use_rerank,
+            "collections": names,
         })
-        return self.hits[:top_k]
+        hits = self.hits
+        if names:
+            wanted = set(names)
+            hits = [hit for hit in hits if hit.collection in wanted]
+        return hits[:top_k]
 
 
 class FakeAnswerer:
@@ -538,12 +570,17 @@ class WebAppTests(TempCorpus):
             "ok", "ready", "index_ready", "chunks", "embedder",
             "embedder_loaded", "model_dir", "model_dir_exists", "index_dir",
             "raw_dir", "raw_dir_exists", "answerer", "editor", "dim",
+            # 多集合：集合名列表 + 数量
+            "collections", "n_collections",
         }
         self.assertEqual(set(body), expected)
         self.assertTrue(body["ok"])
         self.assertTrue(body["ready"])
         self.assertTrue(body["index_ready"])
         self.assertEqual(body["chunks"], 3)
+        # 单索引且没有集合名时集合名是空串（与 Retriever(Path) 的兼容路径一致）
+        self.assertEqual(body["collections"], [""])
+        self.assertEqual(body["n_collections"], 1)
         self.assertEqual(body["embedder"], "OnnxEmbedder")
         self.assertTrue(body["embedder_loaded"])
         self.assertEqual(body["dim"], 1024)
@@ -622,6 +659,330 @@ class WebAppTests(TempCorpus):
         self.assertEqual(app.state.raw_dir, self.raw.resolve())
 
 
+# ---------------------------------------------------------------- 多集合
+
+
+class MultiCollectionTests(TempCorpus):
+    """多集合：两个真实索引目录 + 带 `index_dirs` 的假 retriever。
+
+    这一层要验证的是「Web 层只做转发和校验」：集合列表、默认集合、按集合
+    查、结果里的 collection 字段、以及统计的分组。真实的跨集合融合在
+    `retrieve/` 里，这里不重复测。
+    """
+
+    TECH_CHUNKS = 3
+    PROFILE_CHUNKS = 2
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.tech_dir = self.tmp / "index"
+        self.profile_dir = self.tech_dir / "profile"
+        self.profile_dir.mkdir(parents=True)
+
+        # tech 索引：3 块，两个仓库
+        self.write_index(self.tech_dir, n_chunks=self.TECH_CHUNKS, rows=[
+            {"repo": "JavaGuide", "char_count": 100},
+            {"repo": "CS-Notes", "char_count": 200},
+            {"repo": "JavaGuide", "char_count": 300},
+        ])
+        # profile 索引：2 块，一个仓库
+        self.write_index(self.profile_dir, n_chunks=self.PROFILE_CHUNKS, rows=[
+            {"repo": "何毓-简历", "char_count": 50},
+            {"repo": "何毓-简历", "char_count": 150},
+        ])
+        # 两个索引目录各放一个 1 MiB 的文件：profile 在 tech 目录下面，
+        # 顶层汇总如果不去重就会变成 3 MiB 而不是 2 MiB。
+        self.blob_tech = self.tech_dir / "blob.bin"
+        self.blob_tech.write_bytes(b"x" * (1024 * 1024))
+        self.blob_profile = self.profile_dir / "blob.bin"
+        self.blob_profile.write_bytes(b"y" * (1024 * 1024))
+
+        # 语料按集合分目录：raw/tech/<repo>/<rel_path>、raw/profile/<file>
+        tech_src = self.raw / "tech" / "JavaGuide" / "docs" / "hashmap.md"
+        tech_src.parent.mkdir(parents=True)
+        tech_src.write_text("# HashMap\n\n链表长度到 8 转红黑树。\n", encoding="utf-8")
+        self.tech_src = tech_src
+        pdf = self.raw / "profile" / "何毓-简历.pdf"
+        pdf.parent.mkdir(parents=True)
+        pdf.write_bytes(b"%PDF-1.4\n")
+        self.pdf = pdf
+
+        self.hits = [
+            make_hit(1, collection="tech"),
+            make_hit(2, collection="tech", repo="CS-Notes",
+                     rel_path="notes/rag.md", line_start=40, line_end=80),
+            make_hit(3, collection="profile", repo="何毓-简历",
+                     rel_path="何毓-简历.pdf", locator="P1",
+                     line_start=1, line_end=1),
+        ]
+
+    # ---- 夹具 ----
+
+    def write_index(self, directory: Path, *, n_chunks: int,
+                    rows: list[dict]) -> None:
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "index_meta.json").write_text(
+            json.dumps({"n_chunks": n_chunks, "dim": 1024,
+                        "embedder": "OnnxEmbedder"}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        text = "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows)
+        (directory / "chunks_meta.jsonl").write_text(text, encoding="utf-8")
+
+    def build_app(self, *, default_collections=None, hits=None):
+        retriever = FakeRetriever(
+            self.hits if hits is None else hits,
+            index_dirs={"tech": self.tech_dir, "profile": self.profile_dir},
+        )
+        app = create_app(retriever, None, raw_dir=self.raw, editor="code",
+                         default_collections=default_collections)
+        self.retriever = retriever
+        return app
+
+    # ---- /api/collections ----
+
+    def test_collections_fields_and_counts(self) -> None:
+        app = self.build_app(default_collections=["tech"])
+        with TestClient(app) as client:
+            res = client.get("/api/collections")
+
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        self.assertEqual(set(body), {"collections", "default"})
+        self.assertEqual(body["default"], ["tech"])
+        entries = body["collections"]
+        self.assertEqual([entry["name"] for entry in entries], ["tech", "profile"])
+        for entry in entries:
+            self.assertEqual(set(entry), {"name", "chunks", "has_index"})
+            self.assertTrue(entry["has_index"])
+        counts = {entry["name"]: entry["chunks"] for entry in entries}
+        self.assertEqual(counts, {"tech": self.TECH_CHUNKS,
+                                  "profile": self.PROFILE_CHUNKS})
+
+    def test_collections_default_is_all_when_not_given(self) -> None:
+        app = self.build_app()
+        with TestClient(app) as client:
+            body = client.get("/api/collections").json()
+        self.assertEqual(body["default"], ["tech", "profile"])
+
+    def test_collections_default_ignores_unknown_names(self) -> None:
+        app = self.build_app(default_collections=["nope", "profile"])
+        with TestClient(app) as client:
+            body = client.get("/api/collections").json()
+        self.assertEqual(body["default"], ["profile"])
+
+    def test_collections_cached_at_create_app(self) -> None:
+        """集合列表只在 create_app 时读一次 index_meta.json。"""
+        with mock.patch.object(web_app, "_read_index_meta",
+                               wraps=web_app._read_index_meta) as reader:
+            app = self.build_app(default_collections=["tech"])
+            after_create = reader.call_count
+            with TestClient(app) as client:
+                for _ in range(3):
+                    self.assertEqual(
+                        client.get("/api/collections").status_code, 200)
+
+        self.assertEqual(after_create, 2, "create_app 应该每个集合读一次")
+        self.assertEqual(reader.call_count, after_create,
+                         "集合信息被重复读盘了，必须缓存在 app.state")
+
+    def test_collections_entries_are_cached_values(self) -> None:
+        """create_app 之后删掉索引元数据，接口仍返回启动时的结果。"""
+        app = self.build_app(default_collections=["tech"])
+        (self.profile_dir / "index_meta.json").unlink()
+        with TestClient(app) as client:
+            body = client.get("/api/collections").json()
+        profile = [e for e in body["collections"] if e["name"] == "profile"][0]
+        self.assertTrue(profile["has_index"])
+        self.assertEqual(profile["chunks"], self.PROFILE_CHUNKS)
+
+    # ---- /api/search?collections= ----
+
+    def test_search_only_requested_collection(self) -> None:
+        app = self.build_app(default_collections=["tech"])
+        with TestClient(app) as client:
+            body = client.get("/api/search",
+                              params={"q": "项目经历", "collections": "profile"}).json()
+
+        self.assertEqual(body["collections"], ["profile"])
+        self.assertEqual(body["count"], 1)
+        self.assertEqual({item["collection"] for item in body["results"]},
+                         {"profile"})
+        self.assertEqual(self.retriever.calls[-1]["collections"], ["profile"])
+
+    def test_search_collections_all(self) -> None:
+        app = self.build_app(default_collections=["tech"])
+        with TestClient(app) as client:
+            body = client.get("/api/search",
+                              params={"q": "RAG", "collections": "all"}).json()
+
+        self.assertEqual(body["collections"], ["tech", "profile"])
+        self.assertEqual(body["count"], 3)
+        self.assertEqual({item["collection"] for item in body["results"]},
+                         {"tech", "profile"})
+
+    def test_search_all_is_case_insensitive(self) -> None:
+        app = self.build_app(default_collections=["tech"])
+        with TestClient(app) as client:
+            body = client.get("/api/search",
+                              params={"q": "RAG", "collections": "ALL"}).json()
+        self.assertEqual(body["collections"], ["tech", "profile"])
+
+    def test_search_unknown_collection_is_400_with_available_names(self) -> None:
+        app = self.build_app(default_collections=["tech"])
+        with TestClient(app) as client:
+            res = client.get("/api/search",
+                             params={"q": "x", "collections": "nope"})
+
+        self.assertEqual(res.status_code, 400)
+        detail = res.json()["detail"]
+        self.assertIn("nope", detail)
+        self.assertIn("tech", detail)
+        self.assertIn("profile", detail)
+        self.assertEqual(self.retriever.calls, [])
+
+    def test_search_without_collections_uses_default(self) -> None:
+        app = self.build_app(default_collections=["profile"])
+        with TestClient(app) as client:
+            body = client.get("/api/search", params={"q": "HashMap"}).json()
+
+        self.assertEqual(body["collections"], ["profile"])
+        self.assertEqual(self.retriever.calls[-1]["collections"], ["profile"])
+        self.assertEqual({item["collection"] for item in body["results"]},
+                         {"profile"})
+
+    def test_search_empty_collections_param_uses_default(self) -> None:
+        app = self.build_app(default_collections=["tech"])
+        with TestClient(app) as client:
+            body = client.get("/api/search",
+                              params={"q": "x", "collections": ""}).json()
+        self.assertEqual(body["collections"], ["tech"])
+
+    def test_search_accepts_repeated_and_comma_separated(self) -> None:
+        app = self.build_app(default_collections=["tech"])
+        with TestClient(app) as client:
+            repeated = client.get("/api/search", params=[
+                ("q", "RAG"), ("collections", "tech"), ("collections", "profile"),
+            ]).json()
+            comma = client.get("/api/search",
+                               params={"q": "RAG",
+                                       "collections": "tech,profile"}).json()
+
+        for body in (repeated, comma):
+            self.assertEqual(body["collections"], ["tech", "profile"])
+            self.assertEqual(body["count"], 3)
+
+    def test_search_results_carry_collection_and_locator(self) -> None:
+        app = self.build_app(default_collections=["tech"])
+        with TestClient(app) as client:
+            body = client.get("/api/search",
+                              params={"q": "简历", "collections": "profile"}).json()
+
+        item = body["results"][0]
+        self.assertEqual(item["collection"], "profile")
+        self.assertEqual(item["locator"], "P1")
+        self.assertEqual(item["abs_path"], str(self.pdf.resolve()))
+
+    # ---- /api/open 按集合解析路径 ----
+
+    def test_open_uses_result_collection_for_path(self) -> None:
+        app = self.build_app(default_collections=["tech"])
+        with TestClient(app) as client, \
+                mock.patch.object(web_app, "open_in_editor",
+                                  return_value=(True, "ok")) as opened:
+            client.get("/api/search",
+                       params={"q": "简历", "collections": "profile"})
+            res = client.get("/api/open", params={"chunk_id": "chunk-3"})
+
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.json()["ok"])
+        self.assertEqual(res.json()["path"], str(self.pdf.resolve()))
+        self.assertEqual(opened.call_args[0][0], self.pdf.resolve())
+
+    # ---- /api/health ----
+
+    def test_health_reports_collections(self) -> None:
+        app = self.build_app(default_collections=["tech"])
+        with TestClient(app) as client:
+            body = client.get("/api/health").json()
+
+        self.assertEqual(body["collections"], ["tech", "profile"])
+        self.assertEqual(body["n_collections"], 2)
+        # 块数是所有集合之和（假 retriever 的 index_info 只有一份的块数）
+        self.assertEqual(body["chunks"], self.TECH_CHUNKS + self.PROFILE_CHUNKS)
+
+    # ---- /api/stats 按集合分组 ----
+
+    def test_stats_groups_by_collection(self) -> None:
+        app = self.build_app(default_collections=["tech"])
+        with TestClient(app) as client:
+            body = client.get("/api/stats").json()
+
+        groups = {entry["name"]: entry for entry in body["collections"]}
+        self.assertEqual(sorted(groups), ["profile", "tech"])
+        self.assertEqual(groups["tech"]["chunks"], self.TECH_CHUNKS)
+        self.assertEqual(groups["profile"]["chunks"], self.PROFILE_CHUNKS)
+        self.assertEqual(groups["tech"]["avg_chars"], 200)       # (100+200+300)/3
+        self.assertEqual(groups["profile"]["avg_chars"], 100)    # (50+150)/2
+        self.assertEqual(groups["tech"]["index_dir"], str(self.tech_dir))
+        self.assertEqual(groups["profile"]["index_dir"], str(self.profile_dir))
+        for entry in body["collections"]:
+            self.assertEqual(
+                set(entry),
+                {"name", "chunks", "repos", "avg_chars",
+                 "index_dir", "index_size_mb"},
+            )
+
+    def test_stats_index_size_does_not_double_count_nested_index(self) -> None:
+        app = self.build_app(default_collections=["tech"])
+        with TestClient(app) as client:
+            body = client.get("/api/stats").json()
+
+        groups = {entry["name"]: entry for entry in body["collections"]}
+        # tech 目录里还有 profile 索引：算 tech 的大小时要排掉
+        self.assertAlmostEqual(groups["tech"]["index_size_mb"], 1.0, places=1)
+        self.assertAlmostEqual(groups["profile"]["index_size_mb"], 1.0, places=1)
+        self.assertAlmostEqual(body["index_size_mb"], 2.0, places=1)
+
+    def test_stats_keeps_legacy_top_level_fields(self) -> None:
+        app = self.build_app(default_collections=["tech"])
+        with TestClient(app) as client:
+            body = client.get("/api/stats").json()
+
+        # 旧字段只增不减
+        for key in ("chunks", "repos", "avg_chars", "index_dir", "index_size_mb"):
+            self.assertIn(key, body)
+        self.assertEqual(body["chunks"], self.TECH_CHUNKS + self.PROFILE_CHUNKS)
+        self.assertEqual(body["total_chunks"], body["chunks"])
+        self.assertEqual(sum(entry["chunks"] for entry in body["collections"]),
+                         body["chunks"])
+        self.assertEqual(sum(repo["chunks"] for repo in body["repos"]),
+                         body["chunks"])
+        # (100+200+300+50+150) / 5 = 160
+        self.assertEqual(body["avg_chars"], 160)
+        self.assertEqual(body["index_dir"], str(self.tech_dir))
+        self.assertEqual(
+            {repo["name"]: repo["chunks"] for repo in body["repos"]},
+            {"JavaGuide": 2, "何毓-简历": 2, "CS-Notes": 1},
+        )
+
+    # ---- 首页 ----
+
+    def test_index_page_has_collection_ui_and_no_external_assets(self) -> None:
+        app = self.build_app(default_collections=["tech"])
+        with TestClient(app) as client:
+            res = client.get("/")
+
+        self.assertEqual(res.status_code, 200)
+        html = res.text
+        for needle in ('id="collection-chips"', 'id="collection-filters"',
+                       'id="collection-badge-tpl"', "/api/collections"):
+            self.assertIn(needle, html)
+        lowered = html.lower()
+        self.assertNotIn("<script src=", lowered)
+        self.assertNotIn('href="http', lowered)
+        self.assertNotIn("<link", lowered)
+
 # ---------------------------------------------------------------- /api/stats
 
 
@@ -666,12 +1027,19 @@ class StatsTests(TempCorpus):
         body = res.json()
         self.assertEqual(
             set(body),
-            {"chunks", "repos", "avg_chars", "index_dir", "index_size_mb"},
+            # 旧字段一个都不能少（只增不减），collections / total_chunks 是新增的
+            {"chunks", "repos", "avg_chars", "index_dir", "index_size_mb",
+             "collections", "total_chunks"},
         )
         self.assertEqual(body["chunks"], 3)
+        self.assertEqual(body["total_chunks"], 3)
         self.assertEqual(body["avg_chars"], 200)          # (100 + 200 + 300) / 3
         self.assertEqual(body["index_dir"], str(self.index))
         self.assertIsInstance(body["repos"], list)
+        # 单集合时分组里也只有一项
+        self.assertEqual(len(body["collections"]), 1)
+        self.assertEqual(body["collections"][0]["name"], "")
+        self.assertEqual(body["collections"][0]["chunks"], 3)
 
     def test_stats_repos_sorted_and_sum_to_chunks(self) -> None:
         app = self.build_app()
@@ -771,6 +1139,121 @@ class StatsTests(TempCorpus):
         self.assertEqual(res.status_code, 405)
 
 
+# ---------------------------------------------------------------- cmd_web 发现索引
+
+
+class WebIndexPlanTests(unittest.TestCase):
+    """`cmd_web` 的索引发现逻辑（`_resolve_web_indexes`），不起服务、不加载模型。
+
+    这里覆盖的是命令行到 `Retriever` 之间的那一段：哪些集合会被加载、没索引
+    的集合是跳过还是报错、`--index-dir` 的单集合兼容模式、权重从哪来。
+    """
+
+    TEMPLATE = """\
+[collections]
+default_search = {default}
+
+[collections.tech]
+raw_dir = "{root}/raw/tech"
+index_dir = "{root}/index"
+parser = "markdown"
+
+[collections.profile]
+raw_dir = "{root}/raw/profile"
+index_dir = "{root}/index/profile"
+parser = "auto"
+weight = {profile_weight}
+
+[collections.papers]
+raw_dir = "{root}/raw/papers"
+index_dir = "{root}/index/papers"
+parser = "auto"
+"""
+
+    def setUp(self) -> None:
+        TMP_ROOT.mkdir(parents=True, exist_ok=True)
+        self.tmp = TMP_ROOT / f"plan-{uuid.uuid4().hex[:8]}"
+        self.tmp.mkdir(parents=True)
+        self.tech = self.tmp / "index"
+        self.profile = self.tech / "profile"
+        self.papers = self.tech / "papers"
+        for directory, n_chunks in ((self.tech, 3), (self.profile, 2)):
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / "index_meta.json").write_text(
+                json.dumps({"n_chunks": n_chunks, "embedder": "OnnxEmbedder"}),
+                encoding="utf-8",
+            )
+        self.config = self.tmp / "config.toml"
+        self.write_config()
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def write_config(self, *, default: str = '["tech"]',
+                     profile_weight: str = "1.0") -> None:
+        # TOML 基本字符串里反斜杠是转义符，路径统一用正斜杠，Windows 也认
+        self.config.write_text(
+            self.TEMPLATE.format(root=self.tmp.as_posix(), default=default,
+                                 profile_weight=profile_weight),
+            encoding="utf-8",
+        )
+
+    def plan(self, *extra: str) -> dict:
+        args = build_parser().parse_args(
+            ["web", "--config", str(self.config), *extra])
+        cfg = _load_ingest_config(args)
+        cfg.resolve(self.tmp)          # 配置里全是绝对路径，这一步不改任何东西
+        return _resolve_web_indexes(args, cfg)
+
+    def test_plan_loads_every_indexed_collection(self) -> None:
+        plan = self.plan()
+        self.assertFalse(plan["single"])
+        self.assertEqual(list(plan["index_map"]), ["tech", "profile"])
+        self.assertEqual(plan["chunks"], {"tech": 3, "profile": 2})
+        self.assertEqual(plan["default"], ["tech"])
+
+    def test_plan_skips_collections_without_index(self) -> None:
+        plan = self.plan()
+        # papers 的 index_dir 不存在：跳过、不报错
+        self.assertEqual(plan["skipped"], ["papers"])
+        self.assertNotIn("papers", plan["index_map"])
+
+    def test_plan_weights_come_from_collection_config(self) -> None:
+        self.write_config(profile_weight="0.8")
+        plan = self.plan()
+        self.assertEqual(plan["weights"], {"tech": 1.0, "profile": 0.8})
+
+    def test_plan_raises_only_when_nothing_has_an_index(self) -> None:
+        for directory in (self.tech, self.profile):
+            (directory / "index_meta.json").unlink()
+        with self.assertRaises(FileNotFoundError) as caught:
+            self.plan()
+        message = str(caught.exception)
+        self.assertIn("所有集合都还没有索引", message)
+        self.assertIn("python ingest.py index", message)
+
+    def test_plan_default_falls_back_to_all_indexed(self) -> None:
+        # default_search 指向没索引的 papers：默认集合退回全部有索引的
+        self.write_config(default='["papers"]')
+        plan = self.plan()
+        self.assertEqual(plan["default"], ["tech", "profile"])
+
+    def test_plan_index_dir_forces_single_collection_mode(self) -> None:
+        plan = self.plan("--index-dir", str(self.tech))
+        self.assertTrue(plan["single"])
+        self.assertEqual(plan["index_map"], {"tech": self.tech})
+        self.assertEqual(plan["chunks"], {"tech": 3})
+        self.assertEqual(plan["default"], ["tech"])
+        self.assertEqual(plan["skipped"], [])
+
+    def test_plan_index_dir_without_meta_raises(self) -> None:
+        empty = self.tmp / "empty-index"
+        empty.mkdir()
+        with self.assertRaises(FileNotFoundError) as caught:
+            self.plan("--index-dir", str(empty))
+        self.assertIn("index_meta.json", str(caught.exception))
+
+
 # ---------------------------------------------------------------- 前端静态契约
 
 
@@ -790,6 +1273,9 @@ class FrontendHtmlTests(unittest.TestCase):
             "history-panel", "history-list", "history-clear",
             # 仓库筛选
             "filters", "filter-chips", "filter-summary",
+            # 集合选择 + 集合徽标
+            "collection-filters", "collection-chips", "collection-hint",
+            "collection-badge-tpl",
             # 主题 / 统计 / 错误重试
             "theme-toggle", "stats-panel", "stats-body", "stats-btn", "stats-close",
             "retry-btn", "error-text", "status-chips",
@@ -811,7 +1297,9 @@ class FrontendHtmlTests(unittest.TestCase):
         used |= set(re.findall(r"on\('([A-Za-z0-9_-]+)'", self.script))
         # 新增功能的关键 id 必须真的被脚本用到，而不是只写在 HTML 里
         exercised = {"query-input", "history-panel", "filter-chips",
-                     "theme-toggle", "stats-panel", "retry-btn"}
+                     "theme-toggle", "stats-panel", "retry-btn",
+                     "collection-chips", "collection-filters",
+                     "collection-badge-tpl"}
         self.assertEqual(sorted(exercised - used), [])
         self.assertEqual(sorted(used - self.ids - {"citation-"}), [])
 
@@ -912,6 +1400,65 @@ class FrontendHtmlTests(unittest.TestCase):
         self.assertIn("index_size_mb", self.script)
         self.assertIn("avg_chars", self.script)
         self.assertIn("stats-table", self.html)
+
+    # ---- 集合选择 / 集合徽标 ----
+
+    def test_collection_chips_render_contract(self) -> None:
+        self.assertIn("/api/collections", self.script)
+        self.assertIn("function renderCollectionChips", self.script)
+        self.assertIn("function toggleCollection", self.script)
+        # chip 显示「名字 (块数)」，块数用 filter-count 那个数字样式
+        self.assertIn("fmtInt(item.chunks)", self.script)
+        self.assertIn("state.collections.forEach", self.script)
+        # 至少留一个：全不选时提示并阻止
+        self.assertIn("至少要保留一个集合", self.script)
+        self.assertIn("if (active.length === 1)", self.script)
+
+    def test_collection_badge_contract(self) -> None:
+        # 徽标模板在 HTML 里，JS 克隆后插到 breadcrumb 那一行
+        self.assertIn('<template id="collection-badge-tpl">', self.html)
+        self.assertIn('class="collection-badge"', self.html)
+        self.assertIn("function collectionBadge", self.script)
+        self.assertIn("crumbRow.appendChild(collectionBadge(item.collection))",
+                      self.script)
+        # 颜色走 CSS 变量，深色模式重新定义同一批变量
+        self.assertIn("--coll-tech:", self.html)
+        self.assertIn("--coll-profile-bg:", self.html)
+        dark = self.html.split(':root[data-theme="dark"]', 1)[1]
+        self.assertIn("--coll-tech:", dark)
+        self.assertIn("--coll-tone-1:", dark)
+        # 未知集合按名字散列到 tone-N，至少有四档
+        for index in range(4):
+            self.assertIn(".tone-%d {" % index, self.html)
+
+    def test_collection_storage_contract(self) -> None:
+        self.assertIn("'kb.collections'", self.script)
+        self.assertIn("JSON.stringify(state.activeCollections)", self.script)
+        self.assertIn("JSON.parse(raw)", self.script)
+        self.assertIn("Array.isArray(parsed)", self.script)
+        # 存的集合已经不存在时忽略
+        self.assertIn("!knownCollection(name)", self.script)
+        self.assertIn("function defaultActiveCollections", self.script)
+
+    def test_collection_request_and_url_contract(self) -> None:
+        # 请求带 collections=，值来自选中的 chip
+        self.assertIn("'&collections=' + encodeURIComponent(collectionQuery())",
+                      self.script)
+        self.assertIn("function collectionQuery", self.script)
+        # URL 同步也带上集合，刷新能恢复
+        self.assertIn("url.searchParams.set('collections'", self.script)
+        self.assertIn("params.get('collections')", self.script)
+        self.assertIn("applyCollections(initial.collections)", self.script)
+        # 切集合要清空仓库筛选（结果集变了），两层过滤互不干扰
+        self.assertIn("state.activeRepos = {};\n    renderCollectionChips();",
+                      self.script)
+
+    def test_stats_panel_groups_by_collection(self) -> None:
+        self.assertIn("data.collections", self.script)
+        self.assertIn("group.avg_chars", self.script)
+        self.assertIn("group.index_size_mb", self.script)
+        self.assertIn("renderRepoTable", self.script)
+        self.assertIn("'集合 ' + name + ' · '", self.script)
 
 
 class WebAppSecurityTests(TempCorpus):

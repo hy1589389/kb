@@ -10,12 +10,15 @@
 
 ```
 kb/
-├── config.toml              # 切块参数、检索参数、过滤规则
+├── config.toml              # 切块参数、检索参数、集合定义
 ├── ingest.py                # 入口
 ├── data/
-│   ├── raw/                 # 语料，git clone 到这里
-│   ├── processed/           # 切块结果
-│   └── index/               # 检索索引（生成物）
+│   ├── raw/                 # 语料，按集合分目录
+│   │   ├── tech/            # 技术文档（JavaGuide / CS-Notes / ...）
+│   │   ├── papers/          # 论文 PDF
+│   │   └── profile/         # 简历等个人材料
+│   ├── processed/           # 切块结果（每个集合一份）
+│   └── index/               # 检索索引：tech 用本目录，其它集合用子目录
 ├── models/                  # ONNX 模型（生成物，2.18 GB）
 ├── src/kb/
 │   ├── config.py
@@ -23,6 +26,8 @@ kb/
 │   ├── ingest/              # 第一层：清洗、切块、落盘
 │   │   ├── clean.py
 │   │   ├── chunker.py
+│   │   ├── pdf.py           # PDF 解析（坐标排序 + 字号识别标题）
+│   │   ├── quality.py       # 乱码率 / 空白块 / 平均块长
 │   │   └── pipeline.py
 │   ├── retrieve/            # 第二层：检索
 │   │   ├── tokenize.py      # 中文 bigram 分词
@@ -30,7 +35,7 @@ kb/
 │   │   ├── dense.py         # 暴力向量检索
 │   │   ├── hybrid.py        # RRF 融合
 │   │   ├── embedder.py      # ONNX 嵌入 / 重排
-│   │   └── pipeline.py
+│   │   └── pipeline.py      # Retriever，支持多索引
 │   ├── eval/                # 第三层：评测指标与运行器
 │   ├── generate/            # 第四层：生成与引用校验
 │   │   ├── prompt.py        # 提示词与上下文截断
@@ -39,7 +44,7 @@ kb/
 │   │   ├── pipeline.py      # Answerer / 两层拒答
 │   │   └── types.py         # Citation / Answer
 │   └── web/                 # 第五层：Web 界面与编辑器回链
-│       ├── app.py           # create_app() + 5 个路由
+│       ├── app.py           # create_app() + 路由
 │       ├── editor.py        # 源文件解析 + code / notepad
 │       └── static/index.html  # 单文件前端，无 CDN
 ├── eval/
@@ -242,12 +247,74 @@ python eval\run_eval.py --compare results\a.json results\b.json
 
 ```powershell
 python tests\test_chunker.py      # 切块器
+python tests\test_pdf.py          # PDF 解析
 python tests\test_retrieve.py     # 检索层
 python tests\test_eval.py         # 评测逻辑
 python tests\test_generate.py     # 生成层（不联网）
+python tests\test_collections.py  # 多集合与入库
 python tests\test_web.py          # Web 层与编辑器回链（不加载模型）
 python -m unittest discover -s tests
 ```
+
+## 多集合
+
+技术文档、论文、简历分开存，各自的索引物理隔离。传一份简历不会影响技术文档的检索结果，
+重建简历索引也不会碰那 18,276 个块。
+
+三个集合写在 `config.toml`：
+
+```toml
+[collections]
+default_search = ["tech"]        # search 不写 --collection 时查哪些
+
+[collections.tech]
+raw_dir = "data/raw/tech"
+index_dir = "data/index"         # 沿用原有索引位置
+parser = "markdown"
+
+[collections.papers]
+raw_dir = "data/raw/papers"
+index_dir = "data/index/papers"
+parser = "auto"
+
+[collections.profile]
+raw_dir = "data/raw/profile"
+index_dir = "data/index/profile"
+parser = "auto"
+generation = "disabled"          # 简历不走云端生成，只返回原文
+```
+
+加一份文档：
+
+```powershell
+copy 我的论文.pdf data\raw\papers\
+python ingest.py ingest --collection papers --dry-run    # 先看解析结果
+python ingest.py ingest --collection papers
+python ingest.py index  --collection papers
+python ingest.py search "注意力机制" --collection papers
+```
+
+`--dry-run` 会打印每个文件解析出几个块、平均多长、前两块长什么样，以及质量警告
+（平均块长 < 100 字、乱码率 > 15%、空白块 > 30% 会标 `low_quality`，默认不参与检索）。
+
+同一份文件重复入库不会重复计数：用 sha256 记指纹，内容没变就复用上次的块，
+`chunk_id` 不会漂移。
+
+删掉一份文档：
+
+```powershell
+python ingest.py drop --collection papers --path 我的论文.pdf
+```
+
+`drop` 只动目标集合的索引，并且会二次确认。
+
+### PDF 解析
+
+PyMuPDF 取文本块，按 `(y, x)` 坐标排序恢复阅读顺序 —— 不少导出工具的文本层顺序是乱的，
+直接 `get_text()` 拿到的内容前后颠倒。标题用字号中位数识别（大于 1.15 倍算标题），
+跨页重复率超过 60% 且位于页面顶部或底部 15% 的行当页眉页脚剔除。
+
+引用位置对 PDF 用页码（`P3`），对 Markdown 用行号（`L222-297`）。
 
 ## 配置
 
@@ -452,7 +519,8 @@ BM25 索引：212,481 个词，4,053,133 条 posting，平均块长 370 token。
 
 ## 已知问题
 
-- 只处理 Markdown，PDF 和网页还没做。
+- 只处理 Markdown 和 PDF，网页、代码仓库还没做。
+- PDF 只能按块级坐标恢复阅读顺序，同一行内的文字顺序救不回来（`insert_text` 在同一基线多次写入会被合并成一个 block）。
 - 生成只用一路 DeepSeek，没有本地模型兜底；接口超时或限流时整轮失败，没有重试。
 - 引用校验只检查编号是否存在、句子有没有标引用，不检查引用内容是否真的支持该论断。
 - `scripts/*.ps1` 必须保持纯 ASCII。Windows PowerShell 5.1 对无 BOM 的 `.ps1` 按系统 ANSI
@@ -460,6 +528,7 @@ BM25 索引：212,481 个词，4,053,133 条 posting，平均块长 370 token。
 - 本机 pip 装不上包（解包阶段被沙箱拒绝），依赖靠下 wheel 手动解压，
   见 [docs/phase2-notes.md](docs/phase2-notes.md)。
 - `est_tokens` 是粗估，中文按 1 字 1 token、英文按 3.5 字符 1 token 算。
+- 多集合的跨集合 RRF 权重没标定过，`profile` 目前是 1.0；想让个人材料排在技术文档后面就调小。
 
 ## TODO
 
@@ -468,11 +537,12 @@ BM25 索引：212,481 个词，4,053,133 条 posting，平均块长 370 token。
 - [x] 评测集与 Recall@k / MRR
 - [x] 重排验证（`bge-reranker-base` 实测效果反而低 5 个点，默认关闭，原因见「检索效果」）
 - [x] 生成与引用溯源（`ask`，DeepSeek + 两层拒答 + `[n]` 编号校验 + 同位置引用归并）
+- [x] 多集合隔离（tech / papers / profile）+ PDF 解析 + 指纹幂等
 - [ ] 端到端评测：让模型判断答案正确性，消掉 gold 标窄导致的假失败
 - [ ] 换 `bge-reranker-v2-m3` 再试重排
 - [ ] 引用内容级校验（现在只查编号范围，不查论断是否被引用块支持）
-- [ ] 增量索引
-- [ ] PDF、网页、代码仓库解析
+- [ ] 增量索引（现在每个集合全量重建；profile 只有几块，几秒就完，暂时不需要）
+- [ ] 网页、代码仓库解析
 - [ ] 封装成 MCP Server
 
 ## 协议
