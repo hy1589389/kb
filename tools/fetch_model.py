@@ -1,10 +1,23 @@
-"""从 hf-mirror 下载 ONNX 模型，支持断点续传。
+"""下载 ONNX 模型，支持断点续传。
 
 这台机器上 huggingface.co 不通、hf-mirror.com 通；pip 装不了包但 urllib 正常。
 bge-m3 的 fp32 权重有 2.1 GB，所以必须能续传，中断了不用从头来。
 
+两个来源，用环境变量选：
+
+    KB_MODEL_SOURCE=hf         （默认）走 HF 的 API，默认域名是 hf-mirror.com，
+                               HF Spaces 构建时用 HF_ENDPOINT=https://huggingface.co
+    KB_MODEL_SOURCE=modelscope 走魔搭的 API（modelscope.cn）。魔搭创空间的构建机
+                               在阿里云，直连 modelscope.cn 比走镜像站更快也更稳。
+
 用法：
     python fetch_model.py <目标目录> [repo]
+
+    HF_ENDPOINT=https://huggingface.co python fetch_model.py models BAAI/bge-m3
+    KB_MODEL_SOURCE=modelscope        python fetch_model.py models BAAI/bge-m3
+
+两边下下来的文件是一样的（魔搭的 BAAI/bge-m3 同步了 onnx/model.onnx +
+onnx/model.onnx_data），所以配置文件里的 model_dir 不用改。
 """
 
 from __future__ import annotations
@@ -24,13 +37,43 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 import os  # noqa: E402
 
 MIRROR = (os.environ.get("HF_ENDPOINT") or "https://hf-mirror.com").rstrip("/")
+MS_BASE = (os.environ.get("MS_ENDPOINT") or "https://modelscope.cn").rstrip("/")
+SOURCE = (os.environ.get("KB_MODEL_SOURCE") or "hf").strip().lower()
 UA = {"User-Agent": "dsh"}
 
 
-def list_files(repo: str) -> list[str]:
+def resolve_url(repo: str, remote: str) -> str:
+    """某个仓库文件的下载地址。两边的路径规则不同：HF 是 main，魔搭是 master。"""
+    if SOURCE == "modelscope":
+        return f"{MS_BASE}/models/{repo}/resolve/master/{remote}"
+    return f"{MIRROR}/{repo}/resolve/main/{remote}"
+
+
+def list_files(repo: str) -> dict[str, int]:
+    """仓库里的文件 -> 大小（字节）。取不到大小的来源给 0，后面再 HEAD 一次。
+
+    魔搭的 resolve 接口不返回 Content-Length（HEAD 也是空头），所以大小必须
+    从列表接口拿，否则下载完没法校验，`total=0` 还会让校验永远判失败。
+    """
+    if SOURCE == "modelscope":
+        url = (f"{MS_BASE}/api/v1/models/{repo}/repo/files"
+               "?Revision=master&Recursive=True")
+        req = urllib.request.Request(url, headers=UA)
+        info = json.load(urllib.request.urlopen(req, timeout=60))
+        if int(info.get("Code") or 0) != 200:
+            raise RuntimeError(f"魔搭接口返回 {info.get('Code')}: {info.get('Message')}")
+        rows = (info.get("Data") or {}).get("Files") or []
+        out: dict[str, int] = {}
+        for row in rows:
+            path = str(row.get("Path") or row.get("Name") or "")
+            size = int(row.get("Size") or 0)
+            if path and size > 0:          # 目录项的 Size 是 0，跳过
+                out[path] = size
+        return out
+
     req = urllib.request.Request(f"{MIRROR}/api/models/{repo}", headers=UA)
     info = json.load(urllib.request.urlopen(req, timeout=60))
-    return [s["rfilename"] for s in info.get("siblings", [])]
+    return {str(item["rfilename"]): 0 for item in info.get("siblings", [])}
 
 
 def head_size(url: str) -> int:
@@ -39,14 +82,17 @@ def head_size(url: str) -> int:
         return int(r.headers.get("Content-Length") or 0)
 
 
-def download(repo: str, remote: str, dest: Path) -> bool:
-    url = f"{MIRROR}/{repo}/resolve/main/{remote}"
+def download(repo: str, remote: str, dest: Path, size: int = 0) -> bool:
+    url = resolve_url(repo, remote)
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        total = head_size(url)
+        total = size or head_size(url)
     except Exception as exc:  # noqa: BLE001
         print(f"  [X] {remote}: 取不到大小 ({type(exc).__name__})")
+        return False
+    if not total:
+        print(f"  [X] {remote}: 拿不到文件大小，没法校验，放弃")
         return False
 
     have = dest.stat().st_size if dest.exists() else 0
@@ -92,11 +138,16 @@ def download(repo: str, remote: str, dest: Path) -> bool:
 
 
 def main() -> int:
+    if SOURCE not in ("hf", "modelscope"):
+        print(f"[X] KB_MODEL_SOURCE 只能是 hf 或 modelscope，收到 {SOURCE!r}")
+        return 2
+
     dest_root = Path(sys.argv[1]).resolve()
     repo = sys.argv[2] if len(sys.argv) > 2 else "BAAI/bge-m3"
     name = repo.split("/")[-1]
     dest_dir = dest_root / name
 
+    print(f"来源   : {SOURCE}（{MS_BASE if SOURCE == 'modelscope' else MIRROR}）")
     print(f"仓库   : {repo}")
     print(f"目标   : {dest_dir}")
     print()
@@ -106,9 +157,13 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001
         print(f"[X] 取不到文件列表: {type(exc).__name__}: {exc}")
         return 1
+    if not files:
+        print("[X] 文件列表是空的：仓库名写错了，或者这个来源上没有这个仓库")
+        return 1
 
-    onnx = [f for f in files if f.startswith("onnx/") and "onnx" in f.lower()]
-    print("仓库里的 ONNX 相关文件：")
+    names = list(files)
+    onnx = [f for f in names if f.startswith("onnx/") and "onnx" in f.lower()]
+    print(f"仓库里 {len(names)} 个文件，ONNX 相关 {len(onnx)} 个：")
     for f in onnx:
         print(f"  {f}")
     print()
@@ -135,7 +190,7 @@ def main() -> int:
     ok_all = True
     for remote in wanted:
         dest = dest_dir / Path(remote).name
-        if not download(repo, remote, dest):
+        if not download(repo, remote, dest, files.get(remote, 0)):
             ok_all = False
 
     print()

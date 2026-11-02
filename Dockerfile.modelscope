@@ -1,0 +1,52 @@
+# 魔搭创空间（ModelScope Studio）用的镜像。
+#
+# 和仓库根目录的 Dockerfile 只有一处不同：模型从 modelscope.cn 下，不走
+# hf-mirror。创空间的构建机在阿里云，直连魔搭比走海外镜像站更快也更稳；
+# 反过来 HF Spaces 的构建机走官方域名最快，所以两边各留一份。
+#
+# 改这里记得同步 Dockerfile（除了模型源那两行，其余应当完全一致）。
+#
+#   docker build -f Dockerfile.modelscope -t kb:latest .
+#   docker run --rm -p 7860:7860 kb:latest
+#
+# 目录约定（构建时必须存在）：
+#   src/  tools/  ingest.py  config.toml  requirements-deploy.txt
+#   data/index/   检索索引（tech，约 139 MB，走 git lfs）
+#   docker.yaml   创空间的构建配置，指向本文件
+
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    HF_HOME=/app/.hf-cache \
+    PORT=7860
+
+WORKDIR /app
+
+# 依赖单独一层：只改代码时不会重装
+COPY requirements-deploy.txt ./
+RUN pip install --no-cache-dir -r requirements-deploy.txt
+
+COPY src ./src
+COPY tools ./tools
+COPY ingest.py config.toml ./
+
+# 模型在构建期下好，别让第一个访客等 2.1 GB 下载。
+# 魔搭的 BAAI/bge-m3 同步了 onnx/model.onnx + onnx/model.onnx_data，
+# 下下来的目录结构和 HF 那份一样，config.toml 的 model_dir 不用改。
+RUN KB_MODEL_SOURCE=modelscope python tools/fetch_model.py models BAAI/bge-m3
+
+# 索引跟着镜像走。139 MB，走 git lfs 推到创空间仓库。
+COPY data/index ./data/index
+
+# 语料根目录不存在也能起服务，只是「在编辑器打开源码」按钮会失效
+# （容器里本来也没有编辑器）。create_app 的 /api/health 会如实报告
+# raw_dir_exists=false。
+RUN mkdir -p data/raw
+
+EXPOSE 7860
+
+# --no-browser 必须带：容器里没有图形界面，webbrowser.open 只会报错
+CMD ["sh", "-c", "python ingest.py web --no-browser --host 0.0.0.0 --port ${PORT:-7860}"]

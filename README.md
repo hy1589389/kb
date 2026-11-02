@@ -546,6 +546,25 @@ BM25 索引：212,481 个词，4,053,133 条 posting，平均块长 370 token。
 - 小块合并后，标题路径取各方的最长公共前缀，而不是沿用第一块的标题。
 - 超过 200 字符的连续无空白串替换成占位符，主要是 base64 图片。
 
+## 部署
+
+镜像按「检索本地、生成走 API」的方式打，模型在构建期下好，索引随镜像走。
+
+| 目标 | 说明 |
+| --- | --- |
+| 魔搭创空间 | 免费 2 vCPU / 16 GB，手机号注册，国内直连。步骤见 [deploy-modelscope.md](deploy-modelscope.md) |
+| Hugging Face Spaces | 同档免费硬件，构建机走官方域名下模型。步骤见 [deploy-hf.md](deploy-hf.md) |
+
+两个目标共用一套代码，差别只有模型的下载源和目标平台的构建配置文件：
+
+```powershell
+python tools\prepare_space.py G:\kb-ms  --platform modelscope   # 产出可直接 push 的目录
+python tools\prepare_space.py G:\kb-hf  --platform hf
+```
+
+`tools/fetch_model.py` 用 `KB_MODEL_SOURCE=modelscope` 从 modelscope.cn 下权重，
+默认 `hf` 走 hf-mirror / HF 官方。
+
 ## 已知问题
 
 - 只处理 Markdown 和 PDF，网页、代码仓库还没做。
@@ -567,6 +586,9 @@ BM25 索引：212,481 个词，4,053,133 条 posting，平均块长 370 token。
 - [x] 重排验证（`bge-reranker-base` 实测效果反而低 5 个点，默认关闭，原因见「检索效果」）
 - [x] 生成与引用溯源（`ask`，DeepSeek + 两层拒答 + `[n]` 编号校验 + 同位置引用归并）
 - [x] 多集合隔离（tech / papers / profile）+ PDF 解析 + 指纹幂等
+- [x] Web 界面 + 「今日复习」入口（按日期从评测失败案例出题）
+- [x] 部署打包：Dockerfile + 两个平台的组装脚本（魔搭创空间 / HF Spaces）
+- [ ] 实际上线：HF 账号注册被 418 拦，改走魔搭创空间，尚未推送
 - [ ] 端到端评测：让模型判断答案正确性，消掉 gold 标窄导致的假失败
 - [ ] 换 `bge-reranker-v2-m3` 再试重排
 - [ ] 引用内容级校验（现在只查编号范围，不查论断是否被引用块支持）
