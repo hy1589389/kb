@@ -18,7 +18,12 @@ from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-MIRROR = "https://hf-mirror.com"
+# 默认走镜像：开发机（国内）连不上 huggingface.co。
+# 容器构建时用 HF_ENDPOINT=https://huggingface.co 直连 —— HF 自己的构建机在
+# 内网，走官方域名反而更快，而且镜像站未必在它们的白名单里。
+import os  # noqa: E402
+
+MIRROR = (os.environ.get("HF_ENDPOINT") or "https://hf-mirror.com").rstrip("/")
 UA = {"User-Agent": "dsh"}
 
 

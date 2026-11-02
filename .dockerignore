@@ -1,0 +1,25 @@
+# 构建上下文要小，也别把个人数据带进镜像
+.git
+.gitignore
+.pylibs
+.pylibs-dml
+.tmp
+models
+tests
+results
+eval
+docs
+scripts
+
+# 语料原文：几百 MB，容器里用不到（只服务检索和问答）
+data/raw
+
+# 个人简历索引：不能公开
+data/index/profile
+
+# 各种本地产物
+*.pyc
+__pycache__
+*.log
+.env
+.env.*

@@ -1038,8 +1038,17 @@ def cmd_web(args: argparse.Namespace) -> int:
 
     index_map: dict[str, Path] = plan["index_map"]
 
-    host = (args.host or web_cfg.host or "127.0.0.1").strip()
-    port = int(args.port if args.port is not None else web_cfg.port)
+    # 容器里靠环境变量传监听地址：Hugging Face Spaces 会设 PORT=7860 并要求
+    # 监听 0.0.0.0。优先级是 命令行参数 > 环境变量 > config.toml。
+    env_host = (os.environ.get("KB_HOST") or os.environ.get("HOST") or "").strip()
+    env_port = (os.environ.get("KB_PORT") or os.environ.get("PORT") or "").strip()
+    host = (args.host or env_host or web_cfg.host or "127.0.0.1").strip()
+    if args.port is not None:
+        port = int(args.port)
+    elif env_port:
+        port = int(env_port)
+    else:
+        port = int(web_cfg.port)
     raw_dir = _resolve_raw_dir(args)
     editor = (args.editor or web_cfg.editor or "").strip() or detect_editor()
 

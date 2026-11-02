@@ -1,0 +1,16 @@
+# 部署专用的最小依赖。
+#
+# 和项目根目录的 requirements.txt 不是一回事 —— 那个是早期规划写的，列了
+# sentence-transformers / qdrant / streamlit，实际一个都没用上。这里只列
+# 运行时真正 import 的包，避免镜像里塞 3 GB 用不到的东西。
+#
+# 版本下限按本机跑通的版本来定，上限不锁死（HF 构建机是 linux/amd64）。
+
+numpy>=1.26
+onnxruntime>=1.18          # CPU 版。本机用的是 onnxruntime-directml，容器里不需要
+tokenizers>=0.20
+fastapi>=0.115
+uvicorn>=0.30
+pydantic>=2.7
+pymupdf>=1.24              # ingest 模块在 import 时就会引入，即使 web 模式不用
+tqdm>=4.66
