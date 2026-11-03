@@ -102,7 +102,13 @@ def download(repo: str, remote: str, dest: Path, size: int = 0) -> bool:
 
     headers = dict(UA)
     mode = "wb"
-    if have > 0 and have < total:
+    if have > total:
+        # 比应有的大：上一次写多了（同名文件互相覆盖、或者服务端换了版本）。
+        # 不能续传，直接重下。
+        print(f"  [!] {remote}  本地 {have} 字节 > 应有 {total}，重下")
+        have = 0
+        print(f"  [>] {remote}  {total / 1024**2:.1f} MB")
+    elif have > 0 and have < total:
         headers["Range"] = f"bytes={have}-"
         mode = "ab"
         print(f"  [~] {remote}  续传 {have / 1024**2:.1f}/{total / 1024**2:.1f} MB")
@@ -135,6 +141,43 @@ def download(repo: str, remote: str, dest: Path, size: int = 0) -> bool:
     ok = dest.stat().st_size == total
     print(f"  [{'OK' if ok else '!!'}] {remote}  {dest.stat().st_size / 1024**2:.1f} MB")
     return ok
+
+
+def unique_targets(wanted: list[str]) -> list[str]:
+    """按「下载后落到哪个文件」去重，保留先出现的那份。
+
+    所有文件都平铺到 `models/<repo>/` 下，所以 basename 相同就是同一个文件。
+    bge-m3 的仓库里 `onnx/tokenizer.json`（17,082,821 字节）和根目录的
+    `tokenizer.json`（17,098,108 字节）同名不同内容：两份都下的话，第二份会走
+    download() 的续传分支，从第一份的长度接着往后写 —— 两个 JSON 粘在一起，
+    运行时抛 `trailing characters`。这种事没法靠重试恢复，只能在选文件时挡掉。
+
+    `wanted` 里 onnx/ 下的排在前，所以 bge-m3 保留的是和 ONNX 导出配套的那份。
+    """
+    seen: dict[str, str] = {}
+    out: list[str] = []
+    for remote in wanted:
+        base = Path(remote).name
+        if base in seen:
+            print(f"  [=] 跳过 {remote}：和 {seen[base]} 同名，保留先出现的那份")
+            continue
+        seen[base] = remote
+        out.append(remote)
+    return out
+
+
+def verify_json(dest: Path) -> bool:
+    """JSON 文件下完立刻解析一遍。
+
+    上面那个同名覆盖的 bug 最终表现是运行期 crash-loop（容器起来又退出），
+    在这里挡掉的话，构建阶段就会失败、日志直接指着文件说事。
+    """
+    try:
+        json.loads(dest.read_text(encoding="utf-8"))
+        return True
+    except (OSError, ValueError) as exc:
+        print(f"  [X] {dest.name} 不是合法 JSON：{exc}")
+        return False
 
 
 def main() -> int:
@@ -186,11 +229,16 @@ def main() -> int:
         if extra in files and extra not in wanted:
             wanted.append(extra)
 
+    # 同名文件只能留一份，否则会写进同一个路径（bge-m3 的 tokenizer.json 就是）
+    wanted = unique_targets(wanted)
+
     print()
     ok_all = True
     for remote in wanted:
         dest = dest_dir / Path(remote).name
         if not download(repo, remote, dest, files.get(remote, 0)):
+            ok_all = False
+        elif dest.suffix == ".json" and not verify_json(dest):
             ok_all = False
 
     print()

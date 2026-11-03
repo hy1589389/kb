@@ -160,6 +160,7 @@ curl https://<用户名>-<空间名>.ms.show/api/health
 
 | 现象 | 原因 / 处理 |
 | --- | --- |
+| 日志 `trailing characters at line ...`（`tokenizer.json`） | 模型文件名冲突导致的拼接损坏，`fetch_model.py` 已修（2026-11-04，按 basename 去重 + 下载后校验 JSON）。重新部署即可 |
 | push 被拒，提示文件太大 | 索引单文件最大 71.4 MB（`embeddings.npy`）。确认 git lfs 已生效（`git lfs ls-files`）；仍然被拒就把 `data/index` 拆成两个包，构建时再合并 |
 | 构建日志里模型下载超时 | 换回 hf-mirror：`docker.yaml` 仍指向 Dockerfile，把 `Dockerfile` 里的 `KB_MODEL_SOURCE=modelscope` 改成 `HF_ENDPOINT=https://hf-mirror.com`，重新推送 |
 | 构建成功但页面 502 | 看日志里 uvicorn 是不是监听在 7860；`docker.yaml` 的 `dockerfile` 路径要和实际文件名一致 |
