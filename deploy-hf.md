@@ -58,27 +58,29 @@ cd G:\kb
 python tools\prepare_space.py G:\hf-kb --force
 ```
 
-预期输出：
+预期输出（当前合计 139.7 MB）：
 
 ```
-  ���标目录 : G:\hf-kb
+  平台     : Hugging Face Spaces
+  目标目录 : G:\hf-kb
   索引     : G:\kb\data\index
-  已跳过   : profile（不公开个人数据）
 ------------------------------------------------------------
   ingest.py                       387 B
-  config.toml                    6.5 KB
+  config.toml                    6.7 KB
   requirements-deploy.txt         680 B
-  Dockerfile                      1.9 KB
-  .dockerignore                   342 B
-  src                          460.6 KB
-  tools                         24.6 KB
-  data/index                   139.1 MB
-  README.md                      1.1 KB
+  Dockerfile                      2.0 KB
+  .dockerignore                   524 B
+  results/run_hybrid.json        39.8 KB
+  src                           486.6 KB
+  tools                          31.9 KB
+  data/index                    139.1 MB
+  README.md                       1.5 KB
 ------------------------------------------------------------
-  合计 139.6 MB
+  合计 139.7 MB
 ```
 
-**`已跳过 profile` 这行必须出现** —— 那是你的简历索引，不能公开。
+仓库里不带任何个人材料：`data/index/profile` 如果存在会被跳过（输出里多一行
+`已跳过 : profile`）。本地已经删掉简历数据，所以看不到这行。
 脚本只清目标目录里的内容，**保留 `.git`**，所以不会丢远端关联。
 
 ---
@@ -135,9 +137,9 @@ Space 页面 → **Settings** → **Variables and secrets** → **New secret**
 | | 本地 | 线上 |
 | --- | --- | --- |
 | 嵌入推理 | DirectML，4 GB 显卡，单次 153 ms | CPU，2 vCPU，单次约 1-2 秒 |
-| 集合 | tech + profile | 只有 tech |
 | 语料原文 | 完整，可跳转到源码行 | 不带，跳转按钮失效 |
 | 冷启动 | 每次 60-70 秒（CLI） | 首次请求等模型加载，之后常驻 |
+| 集合 | tech（同一份索引） | tech |
 
 **这不是缩水版**：索引是完整的 18,276 块，检索逻辑完全一样，只是推理设备不同。
 

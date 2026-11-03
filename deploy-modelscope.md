@@ -22,7 +22,6 @@ python tools\prepare_space.py G:\kb-ms --platform modelscope --force
 ```
   目标目录 : G:\kb-ms
   索引     : G:\kb\data\index
-  已跳过   : profile（不公开个人数据）
 ------------------------------------------------------------
   ingest.py                       387 B
   config.toml                    6.7 KB
@@ -38,6 +37,10 @@ python tools\prepare_space.py G:\kb-ms --platform modelscope --force
 ------------------------------------------------------------
   合计 139.7 MB
 ```
+
+如果本地还有 `data/index/profile`（个人材料），这里会多一行
+`已跳过 : profile（不公开个人数据）`，组装时自动剔除。当前仓库里没有个人数据，
+所以看不到这行。
 
 `docker.yaml` 声明用 Docker 构建，目标目录里的 `Dockerfile` 是
 `Dockerfile.modelscope` 那份（`KB_MODEL_SOURCE=modelscope`）。
@@ -153,7 +156,8 @@ curl https://modelscope.cn/studios/<用户名>/<名字>/api/health
   `/api/review/today` 正常出题（说明题库文件确实被打进目录）；`/api/search` 能检索
 - 魔搭文件接口能列出 30 个文件，`onnx/model.onnx_data` 是 2,266,820,608 字节，
   和本地那份一致；单文件下载、截断到 200 字节后的续传都验过
-- `data/index/profile`（个人简历）不会被带出去
+- 组装脚本会跳过 `data/index/profile`（个人材料）。本地已经删掉简历数据和索引，
+  所以现在组装时看不到这行提示
 
 未验证：
 

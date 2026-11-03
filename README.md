@@ -289,6 +289,9 @@ python -m unittest discover -s tests
 技术文档、论文、简历分开存，各自的索引物理隔离。传一份简历不会影响技术文档的检索结果，
 重建简历索引也不会碰那 18,276 个块。
 
+仓库里不带任何个人材料：`data/` 整个目录都在 `.gitignore` 里，部署脚本还会跳过
+`data/index/profile`。`profile` 集合默认是空的，按下面这段配置自己放材料就能重建。
+
 三个集合写在 `config.toml`：
 
 ```toml
