@@ -105,27 +105,42 @@ requirements-deploy.txt  README.md  src/  tools/  data/index/  results/
 
 `data/index` 里应该是 7 个文件（`embeddings.npy` 71.4 MB 最大），没有 `profile/`。
 
-## 4. 构建与验证
+## 4. 部署设置（push 不会自动构建）
 
-创空间页面会显示「构建中」，日志能逐行看：
+推完刷新创空间页面，第 1 步能看到文件列表，但**`git push` 本身不触发构建**：
+接口里还是 `AppPort=0`、`IsPublished=false`、`Status=Empty`，必须把第 2、3 步点完。
+
+第 2 步「部署设置」：
+
+| 项 | 值 |
+| --- | --- |
+| 端口 / AppPort | **7860**，不要留空 —— 平台的转发端口要和镜像 `EXPOSE` 的一致 |
+| 实例规格 | 免费 CPU 档（2 vCPU / 16 GB） |
+| 环境变量 | `DEEPSEEK_API_KEY=<你的 key>`；不配也能跑，只是 `/api/ask` 返回 503 |
+
+第 3 步「确认并部署」点下去，页面变成构建中。
+
+## 5. 构建与验证
+
+构建日志能逐行看：
 
 - `pip install`：约 1~2 分钟
 - 模型下载：2.1 GB，阿里内网 10~60 MB/s，约 1~4 分钟
 - 索引随镜像打包：139 MB，秒级
 - 首字节等待：镜像起来后 `ingest.py web` 还要加载模型，**40~90 秒**
 
-构建完成后访问 `https://modelscope.cn/studios/<用户名>/<名字>`，再查一次接口：
+部署成功后的公开地址形如 `https://<用户名>-<空间名>.ms.show`（页面「访问」按钮
+给的链接为准），再查一次接口：
 
 ```powershell
-curl https://modelscope.cn/studios/<用户名>/<名字>/api/health
+curl https://<用户名>-<空间名>.ms.show/api/health
 ```
 
-应该看到 `"chunks": 18276`、`"ready": true`。注意创空间的实际域名可能带一个
-前缀（页面「访问」按钮给的链接才是准的），端口不用管，平台转发到 7860。
+应该看到 `"chunks": 18276`、`"ready": true`。
 
-## 5. 配置 API key
+## 6. 配置 API key
 
-问答需要 `DEEPSEEK_API_KEY`。平台支持在创空间设置里加环境变量就加；加不了的话
+问答需要 `DEEPSEEK_API_KEY`。第 2 步的部署设置里能加环境变量就加；加不了的话
 `/api/ask` 会返回 503「问答未启用」，检索和「今日复习」照常可用。
 
 ## 和 HF Spaces 的差别
@@ -154,6 +169,8 @@ curl https://modelscope.cn/studios/<用户名>/<名字>/api/health
 
 - 组装目录能直接当产物跑：`/api/health` 返回 18,276 块、只有 tech 集合、模型加载成功；
   `/api/review/today` 正常出题（说明题库文件确实被打进目录）；`/api/search` 能检索
+- 2026-11-03 已 push 成功：仓库里 69 个条目，`data/index` 7 个文件、
+  `embeddings.npy` 74,858,624 字节，`docker.yaml` / `.gitattributes` 都在
 - 魔搭文件接口能列出 30 个文件，`onnx/model.onnx_data` 是 2,266,820,608 字节，
   和本地那份一致；单文件下载、截断到 200 字节后的续传都验过
 - 组装脚本会跳过 `data/index/profile`（个人材料）。本地已经删掉简历数据和索引，
