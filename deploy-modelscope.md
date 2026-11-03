@@ -1,6 +1,6 @@
 # 部署到魔搭创空间
 
-把现有的 Web 界面原样搬到 ModelScope 创空间：免费 2 vCPU / 16 GB、闲置休眠，
+把现有的 Web 界面原样搬到 ModelScope 创空间：免费 2 vCPU / 8 GB、闲置休眠，
 和 HF Spaces 同一档。镜像只有一处不同 —— 模型从 `modelscope.cn` 下，不走 hf-mirror。
 
 ## 前提
@@ -115,8 +115,11 @@ requirements-deploy.txt  README.md  src/  tools/  data/index/  results/
 | 项 | 值 |
 | --- | --- |
 | 端口 / AppPort | **7860**，不要留空 —— 平台的转发端口要和镜像 `EXPOSE` 的一致 |
-| 实例规格 | 免费 CPU 档（2 vCPU / 16 GB） |
+| 实例规格 | 免费 CPU 档（页面写 2 vCPU / 8 GB） |
 | 环境变量 | `DEEPSEEK_API_KEY=<你的 key>`；不配也能跑，只是 `/api/ask` 返回 503 |
+
+8 GB 够用：实测服务起来后峰值 2,582 MB（模型 2.18 GB + 索引 139 MB + Python）。
+`DEEPSEEK_API_KEY` 放**密文变量**，别放明文变量。
 
 第 3 步「确认并部署」点下去，页面变成构建中。
 
@@ -147,7 +150,7 @@ curl https://<用户名>-<空间名>.ms.show/api/health
 
 | | Hugging Face | 魔搭 |
 | --- | --- | --- |
-| 免费规格 | 2 vCPU / 16 GB | 2 vCPU / 16 GB |
+| 免费规格 | 2 vCPU / 8 GB（页面为准） | 2 vCPU / 16 GB |
 | 注册 | 邮箱，需要能访问站点（本机卡 418） | 手机号，国内直连 |
 | 模型源 | `huggingface.co`（构建机内网） | `modelscope.cn`（构建机内网） |
 | 构建配置 | README 的 YAML front-matter | 根目录 `docker.yaml` |

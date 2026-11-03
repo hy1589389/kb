@@ -1,4 +1,4 @@
-# kb
+﻿# kb
 
 本地知识库。把散落各处的 Markdown 文档收进来，切成带标题路径和原文行号的块，
 再用「BM25 + 稠密向量」的混合检索找出来，答案带引用来源。
@@ -555,7 +555,7 @@ BM25 索引：212,481 个词，4,053,133 条 posting，平均块长 370 token。
 
 | 目标 | 说明 |
 | --- | --- |
-| 魔搭创空间 | 免费 2 vCPU / 16 GB，手机号注册，国内直连。步骤见 [deploy-modelscope.md](deploy-modelscope.md) |
+| 魔搭创空间 | 免费 2 vCPU / 8 GB，手机号注册，国内直连。步骤见 [deploy-modelscope.md](deploy-modelscope.md) |
 | Hugging Face Spaces | 同档免费硬件，构建机走官方域名下模型。步骤见 [deploy-hf.md](deploy-hf.md) |
 
 两个目标共用一套代码，差别只有模型的下载源和目标平台的构建配置文件：
