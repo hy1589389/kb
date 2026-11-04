@@ -641,6 +641,24 @@ class WebAppTests(TempCorpus):
         with TestClient(app) as client:
             self.assertTrue(client.get("/api/health").json()["answerer"])
 
+    def test_health_reports_missing_raw_dir(self) -> None:
+        """容器里没带 data/raw：health 必须如实报 False，前端靠它隐藏「打开源码」。
+
+        镜像里千万不能 `mkdir -p data/raw`：空目录会让 raw_dir_exists 变 true，
+        前端就以为本地有语料，每条结果下面都挂一行「源文件未找到」。
+        """
+        retriever = FakeRetriever(self.hits)
+        missing = self.tmp / "no-such-raw"
+        app = create_app(retriever, None, raw_dir=missing, editor="code")
+        with TestClient(app) as client:
+            health = client.get("/api/health").json()
+            results = client.get("/api/search", params={"q": "HashMap"}).json()
+
+        self.assertFalse(health["raw_dir_exists"])
+        self.assertEqual(health["chunks"], len(self.hits))
+        self.assertTrue(all(item["abs_path"] is None for item in results["results"]),
+                        "没有语料根目录时不该凭空造出 abs_path")
+
     # ---- 前端 ----
 
     def test_index_html_has_key_elements(self) -> None:
@@ -1728,6 +1746,23 @@ class FrontendHtmlTests(unittest.TestCase):
                      "collection-badge-tpl", "review-panel", "review-body"}
         self.assertEqual(sorted(exercised - used), [])
         self.assertEqual(sorted(used - self.ids - {"citation-"}), [])
+
+    def test_deploy_mode_hides_source_links(self) -> None:
+        """线上部署不带语料原文、也没有编辑器，这两类提示和按钮要按 health 关掉。"""
+        for needle in ("function editorAvailable", "function rawDirAvailable",
+                       "return !!state.health.editor",
+                       "return state.health.raw_dir_exists !== false"):
+            self.assertIn(needle, self.script)
+        # 「源文件未找到」只在本地应该有语料时显示
+        self.assertIn("if (!item.abs_path && rawDirAvailable())", self.script)
+        # 三处「在 VS Code 打开」都受编辑器可用性控制：结果卡片 / 引用 / 复习原文
+        self.assertIn("if (editorAvailable()) actions.appendChild(openButton)", self.script)
+        self.assertIn("if (editorAvailable()) actions.appendChild(open)", self.script)
+        self.assertIn("if (editorAvailable()) item.appendChild(button)", self.script)
+        # 回车「打开选中结果」在线上直接跳过
+        self.assertIn("if (!editorAvailable()) return;", self.script)
+        # 状态条如实说编辑器不可用，而不是「未探测」
+        self.assertIn("'不可用（线上部署）'", self.script)
 
     def test_review_entry_contract(self) -> None:
         """今日复习：入口、请求、先答后看、Esc 关闭，缺一条就是坏功能。"""

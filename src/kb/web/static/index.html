@@ -1418,9 +1418,21 @@
     };
   }
 
+  /* 线上部署（HF / 魔搭）不带语料原文，容器里也没有编辑器。这两种情况下
+     「在 VS Code 打开」和「源文件未找到」都是噪音，按 /api/health 的报告关掉，
+     别把正常的降级渲染成错误。health 还没回来时按「本地」处理，宁可多显示一个按钮。 */
+  function editorAvailable() {
+    if (!state.health) return true;
+    return !!state.health.editor;
+  }
+
+  function rawDirAvailable() {
+    if (!state.health) return true;
+    return state.health.raw_dir_exists !== false;
+  }
+
   /** 结果卡片左上角的集合徽标：克隆 HTML 里的 <template>，颜色按集合区分。 */
-  function collectionBadge(name) {
-    var tpl = $('collection-badge-tpl');
+  function collectionBadge(name) {    var tpl = $('collection-badge-tpl');
     var badge = (tpl && tpl.content && tpl.content.firstElementChild)
       ? tpl.content.firstElementChild.cloneNode(true)
       : el('span', 'collection-badge');
@@ -1475,7 +1487,7 @@
     openButton.type = 'button';
     openButton.setAttribute('data-action', 'open');
     openButton.addEventListener('click', function () { openInEditor(item, openButton); });
-    actions.appendChild(openButton);
+    if (editorAvailable()) actions.appendChild(openButton);
 
     var copyButton = el('button', 'ghost', '复制引用');
     copyButton.type = 'button';
@@ -1488,7 +1500,8 @@
     if (item.text_chars) {
       card.appendChild(el('div', 'meta', '全文 ' + fmtInt(item.text_chars) + ' 字符'));
     }
-    if (!item.abs_path) {
+    // 只有「本地应该有语料」时才报警；线上本来就不带原文，提示一句是噪音
+    if (!item.abs_path && rawDirAvailable()) {
       card.appendChild(el('div', 'meta bad',
         '源文件未找到：检查启动时的 --raw-dir 是否指向语料仓库根目录'));
     }
@@ -1698,7 +1711,7 @@
       button.addEventListener('click', function () {
         openInEditor({ chunk_id: citation.chunk_id }, button);
       });
-      item.appendChild(button);
+      if (editorAvailable()) item.appendChild(button);
       ordered.appendChild(item);
     });
     wrap.appendChild(ordered);
@@ -1797,7 +1810,8 @@
       bar.appendChild(statusChip(health.ready ? '就绪' : '未就绪', health.ready ? 'ok' : 'bad'));
       bar.appendChild(statusChip(health.answerer ? '问答已启用' : '问答未启用',
         health.answerer ? 'ok' : ''));
-      bar.appendChild(statusChip('编辑器 ' + (health.editor || '未探测')));
+      bar.appendChild(statusChip('编辑器 ' + (health.editor || (health.raw_dir_exists === false
+        ? '不可用（线上部署）' : '未探测'))));
     }
     var elapsed = '上次查询 -';
     if (state.lastElapsed !== null) {
@@ -2091,7 +2105,7 @@
     var open = el('button', 'ghost small', '在 VS Code 打开');
     open.type = 'button';
     open.addEventListener('click', function () { openInEditor(item, open); });
-    actions.appendChild(open);
+    if (editorAvailable()) actions.appendChild(open);
     card.appendChild(actions);
     return card;
   }
@@ -2210,6 +2224,8 @@
 
   function openSelected() {
     if (state.selected < 0) return;
+    // 线上没有编辑器，回车打开源码这条快捷键没有意义
+    if (!editorAvailable()) return;
     var item = state.visible[state.selected];
     if (!item) return;
     var cards = document.querySelectorAll('#results .card');

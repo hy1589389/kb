@@ -160,6 +160,8 @@ curl https://<用户名>-<空间名>.ms.show/api/health
 
 | 现象 | 原因 / 处理 |
 | --- | --- |
+| 「今日复习」提示题库读不出来 | 镜像里没带 `results/`（`Dockerfile` 漏了 `COPY results`）。2026-11-04 已修，重新部署即可 |
+| 每条结果下面一行红字「源文件未找到」 | 镜像里 `mkdir data/raw` 造了个空目录，`/api/health` 误报 `raw_dir_exists=true`。已修：不再建这个目录，前端按 false 隐藏提示和「在 VS Code 打开」 |
 | 日志 `trailing characters at line ...`（`tokenizer.json`） | 模型文件名冲突导致的拼接损坏，`fetch_model.py` 已修（2026-11-04，按 basename 去重 + 下载后校验 JSON）。重新部署即可 |
 | push 被拒，提示文件太大 | 索引单文件最大 71.4 MB（`embeddings.npy`）。确认 git lfs 已生效（`git lfs ls-files`）；仍然被拒就把 `data/index` 拆成两个包，构建时再合并 |
 | 构建日志里模型下载超时 | 换回 hf-mirror：`docker.yaml` 仍指向 Dockerfile，把 `Dockerfile` 里的 `KB_MODEL_SOURCE=modelscope` 改成 `HF_ENDPOINT=https://hf-mirror.com`，重新推送 |

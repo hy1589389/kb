@@ -41,10 +41,12 @@ RUN KB_MODEL_SOURCE=modelscope python tools/fetch_model.py models BAAI/bge-m3
 # 索引跟着镜像走。139 MB，走 git lfs 推到创空间仓库。
 COPY data/index ./data/index
 
-# 语料根目录不存在也能起服务，只是「在编辑器打开源码」按钮会失效
-# （容器里本来也没有编辑器）。create_app 的 /api/health 会如实报告
-# raw_dir_exists=false。
-RUN mkdir -p data/raw
+# 「今日复习」的题库（40 KB）。不 COPY 的话线上那个入口只会显示「题库读不出来」。
+COPY results ./results
+
+# 不建 data/raw：语料原文没随镜像走，前端按 /api/health 的 raw_dir_exists=false
+# 隐藏「在 VS Code 打开」和「源文件未找到」。建一个空目录反而会让健康检查报
+# true，前端就以为本地有语料，每条结果下面挂一行红字。
 
 EXPOSE 7860
 

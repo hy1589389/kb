@@ -10,10 +10,10 @@ eval
 docs
 scripts
 
-# 评测输出不进镜像，只带「今日复习」的题库（40 KB）。
-# 下面这条 ! 必须排在 results/** 之后，Docker 按顺序匹配。
-results/**
-!results/run_hybrid.json
+# 评测结果总共 220 KB，整个 results/ 都进镜像：「今日复习」要读
+# results/run_hybrid.json。不用 !results/xxx 的例外写法 —— 那个依赖匹配顺序，
+# 而 COPY 需要文件真的在构建上下文里，出问题很难查。
+# （之前漏了这条，线上那个入口一直显示「题库读不出来」。）
 
 # 语料原文：几百 MB，容器里用不到（只服务检索和问答）
 data/raw
