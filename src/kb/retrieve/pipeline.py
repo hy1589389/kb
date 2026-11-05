@@ -95,6 +95,26 @@ DEFAULT_CFG: dict = {
 _META_NAME = "chunks_meta.jsonl"
 _INDEX_META = "index_meta.json"
 
+
+def _json_failure(path: Path, exc: Exception) -> str:
+    """JSON 解析失败的报错文本：指出文件、开头内容，以及「是不是 LFS 指针」。
+
+    不加这个的时候，线上只有一句 `[X] Expecting value: line 1 column 1 (char 0)`，
+    既不知道是哪个文件，也看不出索引是没构建好还是大文件没拉下来。
+    """
+    head = ""
+    try:
+        with path.open("rb") as fh:
+            head = fh.read(60).decode("utf-8", "replace").replace("\n", " ")
+    except OSError:
+        pass
+    extra = ""
+    if head.startswith("version https://git-lfs"):
+        extra = ("\n这是 LFS 指针，不是文件内容：构建/部署时大文件没被拉下来。"
+                 "用 python tools/fetch_index.py data/index --repo <owner>/<space> 重拉一份。")
+    return f"{path} 不是合法 JSON：{exc}\n开头是：{head!r}{extra}"
+
+
 # 元数据里保留的字段。`embed_text` 不进索引元数据（它只用于建索引时的
 # 嵌入，检索时用不到），但 `text` 要留 —— 重排需要正文，展示也需要正文，
 # 不存的话每次查询都得回读 44 MB 的 chunks_all.jsonl。
@@ -342,7 +362,10 @@ class _IndexPart:
                 f"先建索引：  python ingest.py index --chunks <chunks.jsonl> "
                 f"--index-dir {self.index_dir}"
             )
-        self.index_info = json.loads(meta_path.read_text(encoding="utf-8"))
+        try:
+            self.index_info = json.loads(meta_path.read_text(encoding="utf-8"))
+        except ValueError as exc:
+            raise ValueError(_json_failure(meta_path, exc)) from exc
 
         chunks_meta = self.index_dir / _META_NAME
         if not chunks_meta.exists():
@@ -350,11 +373,14 @@ class _IndexPart:
                 f"索引目录 {self.index_dir} 里没有 {_META_NAME}，重新建索引"
             )
         meta: list[dict] = []
-        with chunks_meta.open("r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if line:
-                    meta.append(json.loads(line))
+        try:
+            with chunks_meta.open("r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if line:
+                        meta.append(json.loads(line))
+        except ValueError as exc:
+            raise ValueError(_json_failure(chunks_meta, exc)) from exc
         self.meta = meta
 
         self.bm25 = BM25Index.load(self.index_dir)

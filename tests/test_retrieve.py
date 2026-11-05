@@ -801,5 +801,43 @@ class TestOnnxErrorPaths(unittest.TestCase):
             )
 
 
+class TestIndexJsonErrors(unittest.TestCase):
+    """索引文件读不出来时，报错要指出文件、并认得出 LFS 指针。
+
+    线上第一版就是这个：平台构建没 smudge LFS，容器里 `chunks_meta.jsonl` 只剩
+    指针，日志只有 `Expecting value: line 1 column 1 (char 0)`，查了很久。
+    """
+
+    def test_lfs_pointer_is_named_in_error(self) -> None:
+        with temp_dir("lfs-index") as tmp:
+            index = tmp / "index"
+            index.mkdir()
+            (index / "index_meta.json").write_text(
+                json.dumps({"n_chunks": 1, "dim": 8, "embedder": "HashingEmbedder"}),
+                encoding="utf-8")
+            (index / "chunks_meta.jsonl").write_text(
+                "version https://git-lfs.github.com/spec/v1\n"
+                "oid sha256:e147a102c2ecae\n"
+                "size 24048652\n",
+                encoding="utf-8")
+
+            with self.assertRaises(ValueError) as caught:
+                Retriever(index, embedder=HashingEmbedder(dim=8))
+
+            message = str(caught.exception)
+            self.assertIn("chunks_meta.jsonl", message)
+            self.assertIn("LFS", message)
+            self.assertIn("fetch_index.py", message)
+
+    def test_broken_index_meta_names_the_file(self) -> None:
+        with temp_dir("bad-meta") as tmp:
+            index = tmp / "index"
+            index.mkdir()
+            (index / "index_meta.json").write_text("{", encoding="utf-8")
+            with self.assertRaises(ValueError) as caught:
+                Retriever(index, embedder=HashingEmbedder(dim=8))
+            self.assertIn("index_meta.json", str(caught.exception))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

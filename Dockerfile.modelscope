@@ -41,6 +41,13 @@ RUN KB_MODEL_SOURCE=modelscope python tools/fetch_model.py models BAAI/bge-m3
 # 索引跟着镜像走。139 MB，走 git lfs 推到创空间仓库。
 COPY data/index ./data/index
 
+# 平台构建时偶尔不 smudge LFS，上下文里的索引就只剩 `version https://git-lfs...`
+# 的指针文件，容器起来在「加载索引」阶段抛 Expecting value: line 1 column 1。
+# 自检不过就从仓库的文件接口重拉 —— 那个接口返回的是 LFS 解析后的真内容。
+# 换空间名（或换账号）时改下面 --repo 的值。
+RUN python tools/check_index.py data/index || \
+    python tools/fetch_index.py data/index --repo HY666YS/kb-qa
+
 # 「今日复习」的题库（40 KB）。不 COPY 的话线上那个入口只会显示「题库读不出来」。
 COPY results ./results
 

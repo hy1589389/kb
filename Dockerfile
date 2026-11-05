@@ -42,6 +42,10 @@ RUN HF_ENDPOINT=${HF_ENDPOINT} python tools/fetch_model.py models BAAI/bge-m3
 # 索引跟着镜像走。139 MB，靠 git lfs 提交到 Space 仓库。
 COPY data/index ./data/index
 
+# 构建期自检：LFS 没被 smudge 的话这里就会失败，并指出是哪个文件、是不是指针，
+# 而不是等到启动时抛一句看不懂的 Expecting value。
+RUN python tools/check_index.py data/index
+
 # 「今日复习」的题库。不 COPY 的话线上那个入口只会显示「题库读不出来」。
 COPY results ./results
 

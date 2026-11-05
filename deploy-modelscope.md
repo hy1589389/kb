@@ -160,6 +160,7 @@ curl https://<用户名>-<空间名>.ms.show/api/health
 
 | 现象 | 原因 / 处理 |
 | --- | --- |
+| 启动日志 `[X] Expecting value: line 1 column 1 (char 0)` | 构建时 LFS 没 smudge，`data/index` 里只剩指针文件。`Dockerfile` 现在会先跑 `check_index.py`，不过就用 `fetch_index.py` 从仓库的文件接口重拉（2026-11-05 加）。换空间名记得改那里 `--repo` 的值 |
 | 「今日复习」提示题库读不出来 | 镜像里没带 `results/`（`Dockerfile` 漏了 `COPY results`）。2026-11-04 已修，重新部署即可 |
 | 每条结果下面一行红字「源文件未找到」 | 镜像里 `mkdir data/raw` 造了个空目录，`/api/health` 误报 `raw_dir_exists=true`。已修：不再建这个目录，前端按 false 隐藏提示和「在 VS Code 打开」 |
 | 日志 `trailing characters at line ...`（`tokenizer.json`） | 模型文件名冲突导致的拼接损坏，`fetch_model.py` 已修（2026-11-04，按 basename 去重 + 下载后校验 JSON）。重新部署即可 |
