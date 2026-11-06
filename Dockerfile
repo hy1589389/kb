@@ -29,15 +29,18 @@ WORKDIR /app
 COPY requirements-deploy.txt ./
 RUN pip install --no-cache-dir -r requirements-deploy.txt
 
-COPY src ./src
 COPY tools ./tools
-COPY ingest.py config.toml ./
 
 # 模型在构建期下好，别让第一个访客等 2.2 GB 下载。
 # HF Spaces 的构建机连官方域名更快；本地构建可覆盖：
 #   docker build --build-arg HF_ENDPOINT=https://hf-mirror.com -t kb .
+# 这一层特意放在 COPY src 之前：改代码不会让它失效，省一次 2.2 GB 下载。
 ARG HF_ENDPOINT=https://huggingface.co
 RUN HF_ENDPOINT=${HF_ENDPOINT} python tools/fetch_model.py models BAAI/bge-m3
+
+# 代码放在模型之后：只改 src 时上面那层直接命中缓存。
+COPY src ./src
+COPY ingest.py config.toml ./
 
 # 索引跟着镜像走。139 MB，靠 git lfs 提交到 Space 仓库。
 COPY data/index ./data/index

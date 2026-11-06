@@ -49,6 +49,7 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 from kb.generate.types import REFUSE_TEXT, Answer, Citation  # noqa: E402
+from kb.generate.llm import FakeLLM, LLMError  # noqa: E402
 from kb.retrieve.types import SearchHit  # noqa: E402
 from kb.web import app as web_app  # noqa: E402
 from kb.web.app import create_app  # noqa: E402
@@ -1121,6 +1122,87 @@ class MultiCollectionTests(TempCorpus):
 # ---------------------------------------------------------------- 今日复习
 
 
+class RerankSearchTests(TempCorpus):
+    """模型精排：多召回一批交给模型挑；模型没给出判断就退回原顺序。"""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.hits = [
+            make_hit(1),
+            make_hit(2, line_start=40, line_end=80),
+            make_hit(3, repo="CS-Notes", rel_path="notes/rag.md",
+                     line_start=1, line_end=20),
+        ]
+        (self.raw / "CS-Notes" / "notes").mkdir(parents=True)
+        (self.raw / "CS-Notes" / "notes" / "rag.md").write_text(
+            "# RAG\n", encoding="utf-8")
+
+    def build_app(self, llm=None):
+        retriever = FakeRetriever(self.hits)
+        answerer = None
+        if llm is not None:
+            answerer = FakeAnswerer(make_answer(self.hits[0]))
+            answerer.llm = llm          # 精排用 answerer 身上的模型客户端
+        app = create_app(retriever, answerer, raw_dir=self.raw, editor="code")
+        self.retriever = retriever
+        return app
+
+    def get(self, app, *, rerank: bool = True, q: str = "token怎么控制",
+            top_k: int = 3):
+        params = {"q": q, "top_k": top_k}
+        if rerank:
+            params["rerank"] = "1"
+        with TestClient(app) as client:
+            res = client.get("/api/search", params=params)
+        self.assertEqual(res.status_code, 200)
+        return res.json()
+
+    def test_rerank_reorders_and_drops(self) -> None:
+        llm = FakeLLM("3,1")
+        body = self.get(self.build_app(llm))
+
+        self.assertTrue(body["reranked"])
+        self.assertEqual([item["chunk_id"] for item in body["results"]],
+                         ["chunk-3", "chunk-1"])
+        self.assertEqual(body["candidates"], 3)
+        # 精排时多召回一批（这里候选上限 15，假 retriever 只有 3 条）
+        self.assertEqual(self.retriever.calls[0]["top_k"], 15)
+        self.assertEqual(len(llm.calls), 1)
+
+    def test_rerank_zero_means_nothing_relevant(self) -> None:
+        body = self.get(self.build_app(FakeLLM("0")))
+        self.assertTrue(body["reranked"])
+        self.assertEqual(body["count"], 0)
+        self.assertEqual(body["results"], [])
+
+    def test_off_by_default(self) -> None:
+        llm = FakeLLM("3,1")
+        body = self.get(self.build_app(llm), rerank=False)
+        self.assertFalse(body["reranked"])
+        self.assertEqual(body["count"], 3)
+        self.assertEqual(self.retriever.calls[0]["top_k"], 3)
+        self.assertEqual(llm.calls, [])
+
+    def test_without_llm_rerank_is_a_noop(self) -> None:
+        body = self.get(self.build_app(None))
+        self.assertFalse(body["reranked"])
+        self.assertEqual(body["count"], 3)
+        self.assertEqual(self.retriever.calls[0]["top_k"], 3)
+
+    def test_model_failure_keeps_original_order(self) -> None:
+        def boom(_messages):
+            raise LLMError("接口 500")
+
+        body = self.get(self.build_app(FakeLLM(boom)))
+        self.assertFalse(body["reranked"], "模型挂了要退回原顺序，不能让检索失败")
+        self.assertEqual([item["chunk_id"] for item in body["results"]],
+                         ["chunk-1", "chunk-2", "chunk-3"])
+
+    def test_rerank_can_shrink_below_top_k(self) -> None:
+        body = self.get(self.build_app(FakeLLM("2")), top_k=3)
+        self.assertEqual([item["chunk_id"] for item in body["results"]], ["chunk-2"])
+
+
 class ReviewBankTests(unittest.TestCase):
     """题库解析（`kb.web.review`）：纯函数，不碰 retriever，也不起 HTTP。"""
 
@@ -1725,6 +1807,8 @@ class FrontendHtmlTests(unittest.TestCase):
             # 今日复习
             "review-btn", "review-panel", "review-title", "review-meta",
             "review-close", "review-body",
+            # 智能改写
+            "rerank-toggle", "rerank-note",
         }
         self.assertEqual(sorted(expected - self.ids), [],
                          "index.html 缺少新增元素 id")
@@ -1743,9 +1827,25 @@ class FrontendHtmlTests(unittest.TestCase):
         exercised = {"query-input", "history-panel", "filter-chips",
                      "theme-toggle", "stats-panel", "retry-btn",
                      "collection-chips", "collection-filters",
-                     "collection-badge-tpl", "review-panel", "review-body"}
+                     "collection-badge-tpl", "review-panel", "review-body",
+                     "rerank-toggle", "rerank-note"}
         self.assertEqual(sorted(exercised - used), [])
         self.assertEqual(sorted(used - self.ids - {"citation-"}), [])
+
+    def test_rerank_toggle_contract(self) -> None:
+        """模型精排：开关、请求参数、保留条数的提示，三处都得在。"""
+        self.assertIn("模型精排", self.html)
+        self.assertIn('id="rerank-note"', self.html)
+        self.assertIn("'kb.rerank'", self.script)
+        for needle in ("function toggleRerank", "function applyRerank",
+                       "function renderRerankNote", "function loadRerank"):
+            self.assertIn(needle, self.script)
+        # 请求带上 rerank=1；保留了几条要说清楚（可能比 top_k 少）
+        self.assertIn("(state.rerank ? '&rerank=1' : '')", self.script)
+        self.assertIn("' 条候选里保留 '", self.script)
+        self.assertIn("if (!data || !data.reranked)", self.script)
+        # 切开关要立刻用新设置重跑
+        self.assertIn("if (state.lastQuery) run();", self.script)
 
     def test_deploy_mode_hides_source_links(self) -> None:
         """线上部署不带语料原文、也没有编辑器，这两类提示和按钮要按 health 关掉。"""

@@ -503,6 +503,19 @@
   .review-citations { margin-top: 10px; font-size: 12px; color: var(--muted); }
   .review-cite { word-break: break-all; }
 
+  /* ---------- 模型精排 ---------- */
+  #rerank-toggle.active {
+    border-color: var(--accent); color: var(--accent);
+    background: var(--accent-weak); font-weight: 600;
+  }
+  .rerank-note {
+    margin: 0 0 12px; padding: 8px 12px;
+    border-left: 3px solid var(--accent); border-radius: 4px;
+    background: var(--accent-weak); color: var(--text);
+    font-size: 12px; word-break: break-all;
+  }
+  .rerank-note b { font-weight: 600; }
+
   #toast {
     position: fixed; right: 20px; bottom: 52px; z-index: 60;
     max-width: min(560px, calc(100vw - 40px));
@@ -546,6 +559,9 @@
                 aria-selected="false" data-mode="ask">问答</button>
       </div>
       <button id="search-btn" class="primary" type="button">搜索</button>
+      <button id="rerank-toggle" class="ghost small" type="button"
+              aria-pressed="false"
+              title="把前 15 条结果交给模型挑出真正相关的再排序：慢 1~2 秒，能滤掉词面重合的噪音">模型精排</button>
     </div>
     <button id="theme-toggle" class="theme-toggle" type="button"
             aria-label="切换主题">☀ 自动</button>
@@ -581,6 +597,8 @@
       <div id="collection-chips" class="collection-chips"></div>
       <span id="collection-hint" class="collection-hint"></span>
     </section>
+
+    <p id="rerank-note" class="rerank-note hidden"></p>
 
     <section id="filters" class="filters hidden" aria-label="仓库筛选">
       <div id="filter-chips" class="filter-chips"></div>
@@ -638,6 +656,7 @@
   var HISTORY_KEY = 'kb.searchHistory';
   var THEME_KEY = 'kb.theme';
   var COLLECTION_KEY = 'kb.collections';
+  var RERANK_KEY = 'kb.rerank';            // '1' = 模型精排开启
   var HISTORY_LIMIT = 20;
   var THEMES = ['auto', 'light', 'dark'];        // 循环顺序：auto -> light -> dark
   var THEME_LABEL = { auto: '自动', light: '浅色', dark: '深色' };
@@ -676,7 +695,8 @@
     stats: null,             // /api/stats 响应缓存
     statsLoading: false,
     review: null,            // /api/review/today 响应缓存
-    reviewDraft: ''          // 本次会话里的答题草稿，刷新即丢
+    reviewDraft: '',         // 本次会话里的答题草稿，刷新即丢
+    rerank: false            // 模型精排：把前 15 条交给模型挑相关的
   };
 
   /* ================================================================
@@ -1113,6 +1133,11 @@
     if (chips) chips.replaceChildren();
     var summary = $('filter-summary');
     if (summary) summary.textContent = '';
+    var note = $('rerank-note');
+    if (note) {
+      note.replaceChildren();
+      note.classList.add('hidden');
+    }
 
     state.results = [];
     state.visible = [];
@@ -1629,12 +1654,14 @@
     // 集合是请求侧参数：切了集合就换了索引，结果集完全不同
     var data = await api('/api/search?q=' + encodeURIComponent(query) +
       '&top_k=' + RESULT_TOP_K + '&mode=hybrid' +
-      '&collections=' + encodeURIComponent(collectionQuery()));
+      '&collections=' + encodeURIComponent(collectionQuery()) +
+      (state.rerank ? '&rerank=1' : ''));
     state.lastServerMs = typeof data.elapsed_ms === 'number' ? data.elapsed_ms : null;
     state.terms = splitTerms(query);
     state.results = (data.results || []).map(normalizeResult);
     state.repos = aggregateRepos(state.results);
     state.activeRepos = {};
+    renderRerankNote(data);
 
     if (!state.results.length) {
       hide('results');
@@ -1648,6 +1675,50 @@
     }
     renderFilters();
     renderResults();
+  }
+
+  /* ---------- 模型精排 ---------- */
+
+  function loadRerank() {
+    return storageGet(RERANK_KEY) === '1';
+  }
+
+  function applyRerank() {
+    var button = $('rerank-toggle');
+    if (!button) return;
+    button.classList.toggle('active', state.rerank);
+    button.setAttribute('aria-pressed', state.rerank ? 'true' : 'false');
+    button.textContent = state.rerank ? '模型精排 开' : '模型精排';
+    button.title = state.rerank
+      ? '已开启：前 15 条会交给模型挑相关的再排序，慢 1~2 秒'
+      : '把前 15 条结果交给模型挑出真正相关的再排序：慢 1~2 秒，能滤掉词面重合的噪音';
+  }
+
+  function toggleRerank() {
+    state.rerank = !state.rerank;
+    storageSet(RERANK_KEY, state.rerank ? '1' : '0');
+    applyRerank();
+    if (state.lastQuery) run();     // 切了开关立刻用新设置重跑一次
+  }
+
+  function renderRerankNote(data) {
+    var note = $('rerank-note');
+    if (!note) return;
+    note.replaceChildren();
+    if (!data || !data.reranked) {
+      note.classList.add('hidden');
+      return;
+    }
+    var kept = Array.isArray(data.results) ? data.results.length : 0;
+    var total = Number(data.candidates) || kept;
+    if (!kept) {
+      note.appendChild(document.createTextNode(
+        '模型精排：' + total + ' 条候选里没有和问题相关的内容，换个问法，或关掉精排看原始结果'));
+    } else {
+      note.appendChild(document.createTextNode(
+        '模型精排：从 ' + total + ' 条候选里保留 ' + kept + ' 条'));
+    }
+    note.classList.remove('hidden');
   }
 
   /* ================================================================
@@ -2383,6 +2454,7 @@
     on('search-btn', 'click', run);
     on('retry-btn', 'click', run);
     on('theme-toggle', 'click', cycleTheme);
+    on('rerank-toggle', 'click', toggleRerank);
 
     on('stats-btn', 'click', function () {
       if (isStatsOpen()) closeStats();
@@ -2428,6 +2500,8 @@
     state.theme = loadTheme();
     applyTheme();
     watchSystemTheme();
+    state.rerank = loadRerank();
+    applyRerank();
     bindEvents();
     loadHealth();
     // 集合列表要先拿到：chip 的默认选中和「存的集合还在不在」都靠它

@@ -29,14 +29,17 @@ WORKDIR /app
 COPY requirements-deploy.txt ./
 RUN pip install --no-cache-dir -r requirements-deploy.txt
 
-COPY src ./src
 COPY tools ./tools
-COPY ingest.py config.toml ./
 
 # 模型在构建期下好，别让第一个访客等 2.1 GB 下载。
 # 魔搭的 BAAI/bge-m3 同步了 onnx/model.onnx + onnx/model.onnx_data，
 # 下下来的目录结构和 HF 那份一样，config.toml 的 model_dir 不用改。
+# 这一层特意放在 COPY src 之前：改代码不会让它失效，省一次 2.1 GB 下载。
 RUN KB_MODEL_SOURCE=modelscope python tools/fetch_model.py models BAAI/bge-m3
+
+# 代码放在模型之后：只改 src 时上面那层直接命中缓存。
+COPY src ./src
+COPY ingest.py config.toml ./
 
 # 索引跟着镜像走。139 MB，走 git lfs 推到创空间仓库。
 COPY data/index ./data/index

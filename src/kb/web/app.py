@@ -55,10 +55,14 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from ..generate.llm import LLMError
+from ..generate.rank import LLMReranker
 from .editor import detect_editor, open_in_editor, resolve_source_path
 from .review import REVIEW_MAX_CHUNKS, load_review_bank, parse_review_day
 
 __all__ = ["create_app", "STATIC_DIR", "TEXT_PREVIEW_CHARS"]
+
+# 开启「模型精排」时先召回多少条给模型挑。15 条约 1,200 token，再多收益就不明显了。
+RERANK_CANDIDATES = 15
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 INDEX_HTML = STATIC_DIR / "index.html"
@@ -450,6 +454,11 @@ def create_app(retriever: Any, answerer: Any = None, *,
     # 「今日复习」题库：评测结果只在这里读一遍，之后每个请求只是算日期取模
     app.state.review = load_review_bank(review_file)
 
+    # 「模型精排」：拿 answerer 的模型客户端。没有模型（没配 key）就自动关闭，
+    # 接口仍然接受 rerank=1，只是不生效、响应里 reranked 是 false。
+    ranker = LLMReranker(getattr(answerer, "llm", None))
+    app.state.ranker = ranker
+
     hit_cache: dict[str, dict] = {}
     meta_index: dict[str, dict] | None = None
 
@@ -475,6 +484,23 @@ def create_app(retriever: Any, answerer: Any = None, *,
 
     def lookup(chunk_id: str) -> dict | None:
         return hit_cache.get(chunk_id) or from_meta(chunk_id)
+
+    def search_hits(query: str, *, top_k: int, use_dense: bool, use_sparse: bool,
+                    selected: list[str], rerank: bool) -> tuple[list, bool, int]:
+        """检索；开了精排就多召回一批交给模型挑。返回 (命中, 是否精排, 候选数)。"""
+        candidates = max(top_k, RERANK_CANDIDATES) if (rerank and ranker.available) else top_k
+        hits = retriever.search(
+            query, top_k=candidates, use_dense=use_dense, use_sparse=use_sparse,
+            collections=selected or None,
+        )
+        if not (rerank and ranker.available):
+            return hits, False, len(hits)
+
+        picked = ranker.rerank(query, hits)
+        if picked is None:
+            # 模型没给出可用的判断：原顺序照常返回，别让精排变成单点
+            return hits[:top_k], False, len(hits)
+        return picked[:top_k], True, len(hits)
 
     def to_result(hit: Any, fallback_rank: int) -> dict:
         data = remember(hit)
@@ -587,6 +613,10 @@ def create_app(retriever: Any, answerer: Any = None, *,
             None,
             description="只查这些集合，逗号分隔、可重复；all=全部；不传用默认集合",
         ),
+        rerank: bool = Query(
+            False,
+            description="把前 15 条交给模型挑相关的再排序（一次模型调用，慢 1~2 秒）",
+        ),
     ) -> dict:
         query = (q or "").strip()
         if not query:
@@ -596,10 +626,9 @@ def create_app(retriever: Any, answerer: Any = None, *,
         selected = pick_collections(collections)
         started = time.perf_counter()
         try:
-            hits = retriever.search(
-                query, top_k=top_k,
-                use_dense=use_dense, use_sparse=use_sparse,
-                collections=selected or None,
+            hits, reranked, candidates = search_hits(
+                query, top_k=top_k, use_dense=use_dense, use_sparse=use_sparse,
+                selected=selected, rerank=rerank,
             )
         except (FileNotFoundError, RuntimeError, ValueError) as exc:
             raise HTTPException(status_code=500, detail=f"检索失败：{exc}") from exc
@@ -608,6 +637,9 @@ def create_app(retriever: Any, answerer: Any = None, *,
         results = [to_result(hit, i) for i, hit in enumerate(hits, start=1)]
         return {
             "query": query,
+            # 精排有没有真的生效（没配模型、模型没给出可用判断时是 false）
+            "reranked": reranked,
+            "candidates": candidates,
             "mode": (mode or "hybrid").strip().lower(),
             "top_k": top_k,
             "collections": selected,
