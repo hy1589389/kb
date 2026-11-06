@@ -635,6 +635,10 @@ def create_app(retriever: Any, answerer: Any = None, *,
         elapsed_ms = int(round((time.perf_counter() - started) * 1000))
 
         results = [to_result(hit, i) for i, hit in enumerate(hits, start=1)]
+        if reranked:
+            # 精排后名次是新的，别把检索时的旧名次（1、10、11…）带出去
+            for position, item in enumerate(results, start=1):
+                item["rank"] = position
         return {
             "query": query,
             # 精排有没有真的生效（没配模型、模型没给出可用判断时是 false）

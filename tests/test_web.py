@@ -1198,6 +1198,13 @@ class RerankSearchTests(TempCorpus):
         self.assertEqual([item["chunk_id"] for item in body["results"]],
                          ["chunk-1", "chunk-2", "chunk-3"])
 
+    def test_rerank_renumbers_rank_field(self) -> None:
+        """精排后 rank 要重排成 1..N，不能带着检索时的旧名次（1、3、2）。"""
+        body = self.get(self.build_app(FakeLLM("3,1,2")))
+        self.assertEqual([item["rank"] for item in body["results"]], [1, 2, 3])
+        self.assertEqual([item["chunk_id"] for item in body["results"]],
+                         ["chunk-3", "chunk-1", "chunk-2"])
+
     def test_rerank_can_shrink_below_top_k(self) -> None:
         body = self.get(self.build_app(FakeLLM("2")), top_k=3)
         self.assertEqual([item["chunk_id"] for item in body["results"]], ["chunk-2"])
