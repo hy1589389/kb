@@ -68,6 +68,7 @@ import hashlib
 import json
 import os
 import sys
+import threading
 import zlib
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -310,6 +311,8 @@ class OnnxEmbedder(Embedder):
         self.tokenizer = self._load_tokenizer()
         self.session, self.input_names, self.output_names = self._load_session()
         self.dim = self._detect_dim()
+        # 见 `_run_batch` 的说明：并发调用 session.run 会让进程堆损坏。
+        self._lock = threading.Lock()
 
     # --------------------------------------------------------------- 加载
 
@@ -422,6 +425,22 @@ class OnnxEmbedder(Embedder):
     # --------------------------------------------------------------- 推理
 
     def _run_batch(self, texts: list[str]) -> np.ndarray:
+        """串行执行一次前向。
+
+        `with self._lock` 不是保守，是这台机器上的硬性要求：onnxruntime 的
+        `InferenceSession` 文档上允许多线程调用，但本机装的
+        onnxruntime-directml 在并发 `run()` 时会让整个进程堆损坏 ——
+        实测退出码 0xC0000374，没有 Python traceback，try/except 也捕获不到，
+        服务是直接消失的。
+
+        Web 服务的 `def` 路由跑在 anyio 线程池里，两个请求同时到达就是并发调用，
+        所以必须串行。代价可以接受：一次查询编码约 130 ms，6 个并发排队约 0.8 s，
+        比整站挂掉好。
+        """
+        with self._lock:
+            return self._run_batch_locked(texts)
+
+    def _run_batch_locked(self, texts: list[str]) -> np.ndarray:
         encs = self.tokenizer.encode_batch(texts)
         max_len = max((len(e.ids) for e in encs), default=1)
         max_len = max(1, min(max_len, self.max_length))
@@ -537,6 +556,8 @@ class OnnxReranker:
         self._check_files()
         self.tokenizer = self._load_tokenizer()
         self.session, self.input_names = self._load_session()
+        # 与 OnnxEmbedder 同一个原因：并发 session.run 会让进程堆损坏。
+        self._lock = threading.Lock()
 
     def _check_files(self) -> None:
         d = self.model_dir
@@ -580,7 +601,14 @@ class OnnxReranker:
 
         不保证落在 [0,1]：模型最后一层是回归 logit，是否过 sigmoid 取决于
         导出。这里返回原始 logit，因为排序不受单调变换影响。
+
+        串行执行，理由同 `OnnxEmbedder._run_batch`。
         """
+        with self._lock:
+            return self._score_locked(query, passages, batch_size)
+
+    def _score_locked(self, query: str, passages: list[str],
+                      batch_size: int = 8) -> np.ndarray:
         if not passages:
             return np.zeros(0, dtype=np.float32)
         bs = int(batch_size or 8)

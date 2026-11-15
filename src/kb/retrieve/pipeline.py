@@ -57,6 +57,7 @@ dense+sparse 的 RRF 融合，再用 `rrf_fuse` 跨集合合并一次，权重�
 from __future__ import annotations
 
 import json
+import threading
 import time
 from collections.abc import Mapping
 from pathlib import Path
@@ -463,6 +464,8 @@ class Retriever:
         self.embedder = embedder
         self.reranker = reranker
         self._reranker_checked = reranker is not None
+        # 模型懒加载的锁（见 `_ensure_embedder`）：后台预热和请求线程会同时走到那里
+        self._embedder_lock = threading.Lock()
 
         self.parts: dict[str, _IndexPart] = {
             name: _IndexPart(name, path, self.cfg) for name, path in dirs.items()
@@ -512,12 +515,25 @@ class Retriever:
             )
 
     def _ensure_embedder(self) -> Embedder:
+        """懒加载嵌入器。
+
+        加锁是因为 Web 启动方式变了：端口先监听，模型在后台线程预热。这段时间
+        若有请求进来，请求线程和预热线程会同时走到这里 —— 不加锁会各自构造一份
+        ONNX session（2 GB 模型 × 2，直接 OOM）。锁只保护构造过程，编码本身由
+        `OnnxEmbedder._run_batch` 里的锁串行化。
+        """
         if self.embedder is not None:
             return self.embedder
+        with self._embedder_lock:
+            if self.embedder is not None:      # 双检：等锁时别人已经构造好了
+                return self.embedder
+            self.embedder = self._build_embedder()
+            return self.embedder
+
+    def _build_embedder(self) -> Embedder:
         kind = (self.index_info.get("embedder") or "OnnxEmbedder").lower()
         if kind == "hashingembedder":
-            self.embedder = HashingEmbedder(dim=int(self.index_info.get("dim", 512)))
-            return self.embedder
+            return HashingEmbedder(dim=int(self.index_info.get("dim", 512)))
         if self.model_dir is None:
             raise ValueError(
                 "稠密检索需要 embedder，但配置里没有 model_dir。\n"
@@ -525,12 +541,11 @@ class Retriever:
                 "cfg={'model_dir': ...}；\n"
                 "只想先自检的话，用建索引时的 hashing 索引 + HashingEmbedder()。"
             )
-        self.embedder = OnnxEmbedder(
+        return OnnxEmbedder(
             self.model_dir,
             max_length=int(self.cfg["embed_max_length"]),
             batch_size=int(self.cfg["embed_batch_size"]),
         )
-        return self.embedder
 
     def _ensure_reranker(self) -> OnnxReranker | None:
         if self._reranker_checked:
