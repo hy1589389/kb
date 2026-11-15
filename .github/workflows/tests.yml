@@ -41,9 +41,28 @@ jobs:
           python -m pip install httpx
 
       - name: 跑测试
+        # 失败时把 FAIL/ERROR 行打成 ::error:: 注解。原因很实际：这个仓库的
+        # Actions 日志要管理员权限才能下载，而注解是公开可读的 —— 不开登录也能
+        # 看出是哪几个用例挂了。成功时不打扰。
+        shell: pwsh
         env:
           PYTHONIOENCODING: utf-8
-        run: python -m unittest discover -s tests
+        run: |
+          python -m unittest discover -s tests 2>&1 | Tee-Object -FilePath unittest.log
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            $lines = Get-Content unittest.log -Encoding UTF8 |
+              Select-String -Pattern '^(FAIL|ERROR):|^Ran \d+ tests|^FAILED' |
+              Select-Object -First 15 |
+              ForEach-Object { $_.Line.Trim() }
+            $summary = ($lines -join ' | ')
+            if ($summary.Length -gt 800) { $summary = $summary.Substring(0, 800) }
+            Write-Host "::error title=测试失败::$summary"
+            Write-Host "---- 失败用例详情（最多 80 行）----"
+            Get-Content unittest.log -Encoding UTF8 | Select-String -Pattern 'FAIL:|ERROR:|AssertionError|Error:' -Context 0,3 |
+              Select-Object -First 20 | ForEach-Object { $_.Line.Trim() }
+            exit 1
+          }
 
       - name: 测试留下的临时目录不该进版本库
         if: always()

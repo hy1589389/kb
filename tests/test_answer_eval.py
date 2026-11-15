@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -314,10 +315,17 @@ class ArtifactTests(unittest.TestCase):
         outcome = AnswerOutcome(qid="q001", question="a", gold_in_context=True,
                                 judge={"ratio": 0.5, "unsupported": []})
         summary = summarize([outcome])
-        with tempfile.TemporaryDirectory(dir=TMP_ROOT if TMP_ROOT.exists() else None) as tmp:
-            path = save_answer_run(Path(tmp) / "run_answer.json", [outcome], summary,
+        # 不用 tempfile.TemporaryDirectory：它的清理走 rmtree，在 Windows 上遇到
+        # 杀毒/索引扫描正抓着刚写完的文件会抛 PermissionError，整个用例红掉；
+        # 项目里的临时目录也统一放在 <repo>/.tmp 下（系统 %TEMP% 在某些环境不可写）。
+        TMP_ROOT.mkdir(parents=True, exist_ok=True)
+        tmp = Path(tempfile.mkdtemp(prefix="ans-", dir=TMP_ROOT))
+        try:
+            path = save_answer_run(tmp / "run_answer.json", [outcome], summary,
                                    {"top_k": 5, "judge": True})
             payload = json.loads(path.read_text(encoding="utf-8"))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
         self.assertEqual(set(payload), {"config", "summary", "per_query"})
         self.assertEqual(payload["per_query"][0]["qid"], "q001")
 
