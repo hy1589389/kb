@@ -429,13 +429,22 @@ class TestEdgeCases(unittest.TestCase):
 
 class TestPymupdfAvailability(unittest.TestCase):
     def test_pymupdf_importable_via_kb(self):
-        """kb 包把 .pylibs 注入 sys.path，pymupdf 在任何模块里都能 import。"""
+        """kb 包导入之后，pymupdf 在任何模块里都能直接 import。
+
+        依赖来源有两种：本机是手动解压的 wheel（`<项目根>/.pylibs`，`kb/__init__.py`
+        把它插到 `sys.path` 前面），CI 是 pip 装进 site-packages。这里只校验
+        「能用」；「来自 .pylibs」只在真的存在那个目录时才校验，否则 CI 上必红。
+        """
         try:
             pymupdf = pymupdf_module()
         except ImportError as exc:  # pragma: no cover
             self.skipTest(f"本机没有 PyMuPDF：{exc}")
         self.assertTrue(callable(pymupdf.open))
-        self.assertIn(".pylibs", str(Path(pymupdf.__file__).parent).lower())
+
+        from kb import pylibs_candidates
+
+        if any(path.is_dir() for path in pylibs_candidates()):
+            self.assertIn(".pylibs", str(Path(pymupdf.__file__).parent).lower())
 
 
 if __name__ == "__main__":
