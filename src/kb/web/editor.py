@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +60,47 @@ def _field(chunk: Any, name: str, default: Any = None) -> Any:
     return getattr(chunk, name, default)
 
 
+@lru_cache(maxsize=64)
+def _subdirs_of(base_text: str) -> tuple[Path, ...]:
+    """`base` 的一级子目录，只算一次。
+
+    旧索引（多集合改造前建的）里没有 `collection` 字段，只能靠「把 raw_dir 的
+    一级子目录都当候选」来猜布局。每条检索结果都要猜一次，而一次 `/api/search`
+    有 5~10 条结果 —— 实测单条 4.7 ms 里大头就是这里反复 `iterdir()` 加对不存在
+    的路径做 `resolve()`。
+
+    缓存的是**目录列表**，不是文件状态：文件后来新增/删除仍然被 `is_file()` 看到，
+    只有「运行期间新增一级集合目录」需要重启才能发现。`maxsize=64` 是给测试留的
+    余量，测试会来回换临时目录。
+    """
+    try:
+        return tuple(sorted(p for p in Path(base_text).iterdir() if p.is_dir()))
+    except OSError:
+        return ()
+
+
+@lru_cache(maxsize=64)
+def _resolved_base(raw_text: str) -> Path:
+    """`raw_dir` 的 resolve 结果。同一个服务的 raw_dir 是常量。"""
+    return Path(raw_text).resolve()
+
+
+@lru_cache(maxsize=512)
+def _has_repo_dir(base_text: str, repo: str) -> bool:
+    """`<base>/<repo>` 是不是目录。
+
+    布局判据（见下面 `resolve_source_path` 的注释）对每条结果都要问一次，
+    而 repo 的取值只有语料仓库那几个 —— 缓存后单个 chunk 的探测次数从
+    「候选数 × 2」降到 2 次。
+    """
+    if not repo:
+        return False
+    try:
+        return (Path(base_text) / repo).is_dir()
+    except OSError:
+        return False
+
+
 def resolve_source_path(chunk: Any, raw_dir: Path | str) -> Path | None:
     """chunk（SearchHit 或 dict）-> 源文件的绝对路径；取不到返回 None。
 
@@ -66,7 +108,7 @@ def resolve_source_path(chunk: Any, raw_dir: Path | str) -> Path | None:
     解析后落在 `raw_dir` 之外、文件不存在。调用方只需要区分「有/没有」，
     具体原因写进日志没有意义 —— 用户能做的都是换一个 chunk。
     """
-    base = Path(raw_dir).resolve()
+    base = _resolved_base(str(raw_dir))
 
     rel_text = str(_field(chunk, "rel_path", "") or "").strip()
     if not rel_text:
@@ -93,20 +135,22 @@ def resolve_source_path(chunk: Any, raw_dir: Path | str) -> Path | None:
     # 后者在集合根下恰好有同名文件时会拼错。
     bases: list[Path] = []
     collection = str(_field(chunk, "collection", "") or "").strip()
-    if collection and (base / collection).is_dir():
+    if collection and _has_repo_dir(str(base), collection):
         bases.append(base / collection)
     elif not collection:
         # 旧索引（多集合改造前建的）里没有 collection 字段，而语料已经挪到了
         # <raw_dir>/<collection>/ 下。这里把一级子目录也当候选 —— 不这么做的话
         # Web 的 /api/open 直接查原始 meta 字典时会拼不出路径。
-        try:
-            bases.extend(sorted(p for p in base.iterdir() if p.is_dir()))
-        except OSError:
-            pass
+        bases.extend(_subdirs_of(str(base)))
     bases.append(base)
 
     for b in bases:
-        candidate = b / repo / rel if (repo is not None and (b / repo).is_dir()) else b / rel
+        use_repo = repo is not None and _has_repo_dir(str(b), repo_text)
+        candidate = b / repo / rel if use_repo else b / rel
+        # 大多数候选是「猜错布局」的空路径。先做一次最便宜的 is_file() 挡掉，
+        # 只有真存在的才付 resolve() 的代价（Windows 上它会逐级碰文件系统）。
+        if not candidate.is_file():
+            continue
         resolved = candidate.resolve()
         # resolve() 之后仍然要判：`..`、符号链接、盘符跳转都在这一步收敛。
         if not resolved.is_relative_to(base):
