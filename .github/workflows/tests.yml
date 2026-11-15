@@ -1,0 +1,53 @@
+name: tests
+
+# 只为两件事跑：别把坏提交推上 main、PR 进来先知道坏了。
+# 不跑评测（需要索引 + 2 GB 模型 + API key），那是本地手动执行的。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unittest:
+    # 用 windows-latest：测试里有编辑器探测（code / notepad）、Windows 路径拼接、
+    # cp936 控制台编码这些分支，跟开发机保持一致才有意义。
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 = Dockerfile 里部署用的版本；3.13 = 开发机版本。
+        # 差两个大版本，跑两遍能早点发现「本机好的、镜像里坏」这类问题。
+        python-version: ["3.11", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-deploy.txt
+
+      - name: 安装运行时依赖
+        # 用 requirements-deploy.txt 而不是 requirements.txt：后者是早期规划写的，
+        # 列了 sentence-transformers / qdrant / streamlit，一个都没用上，装了纯属浪费时间。
+        # httpx 单独装：fastapi.testclient 需要它，但它不在运行时依赖里。
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-deploy.txt
+          python -m pip install httpx
+
+      - name: 跑测试
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python -m unittest discover -s tests
+
+      - name: 测试留下的临时目录不该进版本库
+        if: always()
+        run: |
+          git status --short
+          if (git status --porcelain) { Write-Error ".tmp 或其他临时文件没被忽略"; exit 1 }
+        shell: pwsh
