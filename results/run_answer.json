@@ -1,0 +1,1748 @@
+{
+  "config": {
+    "questions": "G:\\kb\\eval\\questions.jsonl",
+    "top_k": 5,
+    "judge": true,
+    "collections": [],
+    "elapsed_sec": 104.4,
+    "ran_at": "2026-11-12T23:40:28",
+    "index_dir": "data/index",
+    "model": "deepseek-chat"
+  },
+  "summary": {
+    "n": 40,
+    "n_refused": 4,
+    "refusal_rate": 0.1,
+    "n_answerable": 30,
+    "n_false_refusal": 0,
+    "false_refusal_rate": 0.0,
+    "gold_in_context_rate": 0.75,
+    "mean_uncited_ratio": 0.0895,
+    "invalid_refs_total": 0,
+    "judged": 36,
+    "judge_error": 0,
+    "mean_support_ratio": 0.9694,
+    "unsupported_sentences": 5,
+    "by_category": {
+      "中英混杂": {
+        "n": 7,
+        "refused": 1,
+        "mean_support_ratio": 1.0
+      },
+      "代码类": {
+        "n": 8,
+        "refused": 0,
+        "mean_support_ratio": 0.9292
+      },
+      "同义改写": {
+        "n": 7,
+        "refused": 0,
+        "mean_support_ratio": 1.0
+      },
+      "干扰项": {
+        "n": 5,
+        "refused": 2,
+        "mean_support_ratio": 0.9333
+      },
+      "术语精确匹配": {
+        "n": 6,
+        "refused": 0,
+        "mean_support_ratio": 1.0
+      },
+      "跨节综合": {
+        "n": 7,
+        "refused": 1,
+        "mean_support_ratio": 0.9444
+      }
+    },
+    "mean_latency_ms": 1907,
+    "total_tokens": 85955
+  },
+  "per_query": [
+    {
+      "qid": "q001",
+      "question": "HashMap 的树化阈值为什么定成 8？为什么链表变长时不是直接转红黑树？",
+      "category": "术语精确匹配",
+      "difficulty": "easy",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 378,
+      "n_citations": 4,
+      "gold_in_context": true,
+      "gold_hit_rank": 1,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 4,
+      "usage": {
+        "prompt_tokens": 2257,
+        "completion_tokens": 228,
+        "total_tokens": 2485,
+        "prompt_tokens_details": {
+          "cached_tokens": 2048
+        },
+        "prompt_cache_hit_tokens": 2048,
+        "prompt_cache_miss_tokens": 209
+      },
+      "latency_ms": 6050,
+      "judge": {
+        "supported": 4,
+        "total": 4,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 2279,
+          "completion_tokens": 12,
+          "total_tokens": 2291,
+          "prompt_tokens_details": {
+            "cached_tokens": 1792
+          },
+          "prompt_cache_hit_tokens": 1792,
+          "prompt_cache_miss_tokens": 487
+        }
+      }
+    },
+    {
+      "qid": "q002",
+      "question": "负载因子设成 0.75 是怎么来的？调大调小分别会怎样？",
+      "category": "术语精确匹配",
+      "difficulty": "easy",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 208,
+      "n_citations": 4,
+      "gold_in_context": true,
+      "gold_hit_rank": 1,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 3,
+      "usage": {
+        "prompt_tokens": 1616,
+        "completion_tokens": 126,
+        "total_tokens": 1742,
+        "prompt_tokens_details": {
+          "cached_tokens": 1408
+        },
+        "prompt_cache_hit_tokens": 1408,
+        "prompt_cache_miss_tokens": 208
+      },
+      "latency_ms": 1633,
+      "judge": {
+        "supported": 3,
+        "total": 3,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 1548,
+          "completion_tokens": 12,
+          "total_tokens": 1560,
+          "prompt_tokens_details": {
+            "cached_tokens": 1152
+          },
+          "prompt_cache_hit_tokens": 1152,
+          "prompt_cache_miss_tokens": 396
+        }
+      }
+    },
+    {
+      "qid": "q003",
+      "question": "TCP 为什么要三次握手？只握两次不行吗？",
+      "category": "术语精确匹配",
+      "difficulty": "easy",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 373,
+      "n_citations": 5,
+      "gold_in_context": true,
+      "gold_hit_rank": 5,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 5,
+      "usage": {
+        "prompt_tokens": 2033,
+        "completion_tokens": 199,
+        "total_tokens": 2232,
+        "prompt_tokens_details": {
+          "cached_tokens": 1792
+        },
+        "prompt_cache_hit_tokens": 1792,
+        "prompt_cache_miss_tokens": 241
+      },
+      "latency_ms": 2020,
+      "judge": {
+        "supported": 5,
+        "total": 5,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 1980,
+          "completion_tokens": 12,
+          "total_tokens": 1992,
+          "prompt_tokens_details": {
+            "cached_tokens": 1536
+          },
+          "prompt_cache_hit_tokens": 1536,
+          "prompt_cache_miss_tokens": 444
+        }
+      }
+    },
+    {
+      "qid": "q004",
+      "question": "缓存穿透是什么意思？一般怎么解决？",
+      "category": "术语精确匹配",
+      "difficulty": "easy",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 253,
+      "n_citations": 5,
+      "gold_in_context": true,
+      "gold_hit_rank": 1,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 2,
+      "usage": {
+        "prompt_tokens": 1379,
+        "completion_tokens": 137,
+        "total_tokens": 1516,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 1379
+      },
+      "latency_ms": 1890,
+      "judge": {
+        "supported": 2,
+        "total": 2,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 1286,
+          "completion_tokens": 12,
+          "total_tokens": 1298,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1286
+        }
+      }
+    },
+    {
+      "qid": "q005",
+      "question": "一维 dp 数组写 01 背包，为什么第二层循环（背包容量）必须从大到小遍历？",
+      "category": "术语精确匹配",
+      "difficulty": "medium",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 216,
+      "n_citations": 5,
+      "gold_in_context": true,
+      "gold_hit_rank": 3,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 4,
+      "usage": {
+        "prompt_tokens": 2107,
+        "completion_tokens": 129,
+        "total_tokens": 2236,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 2107
+      },
+      "latency_ms": 1339,
+      "judge": {
+        "supported": 4,
+        "total": 4,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 1991,
+          "completion_tokens": 12,
+          "total_tokens": 2003,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1991
+        }
+      }
+    },
+    {
+      "qid": "q006",
+      "question": "为什么扩容要重新计算哈希？扩容那次为什么是 O(n) 的代价，不是说哈希表插入是 O(1) 吗？",
+      "category": "同义改写",
+      "difficulty": "medium",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 226,
+      "n_citations": 5,
+      "gold_in_context": true,
+      "gold_hit_rank": 2,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 4,
+      "usage": {
+        "prompt_tokens": 1480,
+        "completion_tokens": 146,
+        "total_tokens": 1626,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 1480
+      },
+      "latency_ms": 1893,
+      "judge": {
+        "supported": 4,
+        "total": 4,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 1403,
+          "completion_tokens": 12,
+          "total_tokens": 1415,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1403
+        }
+      }
+    },
+    {
+      "qid": "q007",
+      "question": "客户端发完最后一个 ACK 之后为什么不能马上把连接关掉，还要等一会儿？",
+      "category": "同义改写",
+      "difficulty": "medium",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 336,
+      "n_citations": 5,
+      "gold_in_context": true,
+      "gold_hit_rank": 3,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 4,
+      "usage": {
+        "prompt_tokens": 1847,
+        "completion_tokens": 186,
+        "total_tokens": 2033,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 1847
+      },
+      "latency_ms": 2165,
+      "judge": {
+        "supported": 4,
+        "total": 4,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 1794,
+          "completion_tokens": 12,
+          "total_tokens": 1806,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1794
+        }
+      }
+    },
+    {
+      "qid": "q008",
+      "question": "背包问题为什么不能每次挑价值最高的物品往里放？用贪心不行吗？",
+      "category": "同义改写",
+      "difficulty": "medium",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 153,
+      "n_citations": 5,
+      "gold_in_context": false,
+      "gold_hit_rank": 0,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 2,
+      "usage": {
+        "prompt_tokens": 2285,
+        "completion_tokens": 95,
+        "total_tokens": 2380,
+        "prompt_tokens_details": {
+          "cached_tokens": 2048
+        },
+        "prompt_cache_hit_tokens": 2048,
+        "prompt_cache_miss_tokens": 237
+      },
+      "latency_ms": 1773,
+      "judge": {
+        "supported": 2,
+        "total": 2,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 2146,
+          "completion_tokens": 12,
+          "total_tokens": 2158,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 2146
+        }
+      }
+    },
+    {
+      "qid": "q009",
+      "question": "为什么数组长度小于 64 的时候不转红黑树，而是先扩容？",
+      "category": "同义改写",
+      "difficulty": "medium",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 230,
+      "n_citations": 4,
+      "gold_in_context": true,
+      "gold_hit_rank": 1,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 4,
+      "usage": {
+        "prompt_tokens": 2065,
+        "completion_tokens": 134,
+        "total_tokens": 2199,
+        "prompt_tokens_details": {
+          "cached_tokens": 512
+        },
+        "prompt_cache_hit_tokens": 512,
+        "prompt_cache_miss_tokens": 1553
+      },
+      "latency_ms": 1861,
+      "judge": {
+        "supported": 4,
+        "total": 4,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 1989,
+          "completion_tokens": 12,
+          "total_tokens": 2001,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1989
+        }
+      }
+    },
+    {
+      "qid": "q010",
+      "question": "ConcurrentHashMap 在 JDK 1.8 里更新数据时锁的是什么粒度？和 1.7 的分段锁有什么区别？",
+      "category": "同义改写",
+      "difficulty": "medium",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 261,
+      "n_citations": 5,
+      "gold_in_context": true,
+      "gold_hit_rank": 1,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 3,
+      "usage": {
+        "prompt_tokens": 1859,
+        "completion_tokens": 139,
+        "total_tokens": 1998,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 1859
+      },
+      "latency_ms": 1680,
+      "judge": {
+        "supported": 3,
+        "total": 3,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 1723,
+          "completion_tokens": 12,
+          "total_tokens": 1735,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1723
+        }
+      }
+    },
+    {
+      "qid": "q011",
+      "question": "JVM 里 G1 和 CMS 收集器在回收算法和停顿控制上有什么区别？G1 为什么号称能预测停顿？",
+      "category": "中英混杂",
+      "difficulty": "medium",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 306,
+      "n_citations": 4,
+      "gold_in_context": true,
+      "gold_hit_rank": 1,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 5,
+      "usage": {
+        "prompt_tokens": 2454,
+        "completion_tokens": 177,
+        "total_tokens": 2631,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 2454
+      },
+      "latency_ms": 1939,
+      "judge": {
+        "supported": 5,
+        "total": 5,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 2426,
+          "completion_tokens": 12,
+          "total_tokens": 2438,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 2426
+        }
+      }
+    },
+    {
+      "qid": "q012",
+      "question": "CAS 指令有哪三个操作数？ABA 问题该怎么解决？",
+      "category": "中英混杂",
+      "difficulty": "medium",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 134,
+      "n_citations": 5,
+      "gold_in_context": false,
+      "gold_hit_rank": 0,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 2,
+      "usage": {
+        "prompt_tokens": 1759,
+        "completion_tokens": 72,
+        "total_tokens": 1831,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 1759
+      },
+      "latency_ms": 1458,
+      "judge": {
+        "supported": 2,
+        "total": 2,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 1583,
+          "completion_tokens": 12,
+          "total_tokens": 1595,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1583
+        }
+      }
+    },
+    {
+      "qid": "q013",
+      "question": "HNSW 和 IVFFLAT 这两种向量索引分别适合什么场景？内存和召回率怎么取舍？",
+      "category": "中英混杂",
+      "difficulty": "medium",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 282,
+      "n_citations": 5,
+      "gold_in_context": true,
+      "gold_hit_rank": 3,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 4,
+      "usage": {
+        "prompt_tokens": 2609,
+        "completion_tokens": 167,
+        "total_tokens": 2776,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 2609
+      },
+      "latency_ms": 1645,
+      "judge": {
+        "supported": 4,
+        "total": 4,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 2589,
+          "completion_tokens": 12,
+          "total_tokens": 2601,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 2589
+        }
+      }
+    },
+    {
+      "qid": "q014",
+      "question": "CS-Notes 里 24. 反转链表那篇，用迭代（头插法）反转单链表的 Java 代码怎么写？",
+      "category": "代码类",
+      "difficulty": "easy",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 280,
+      "n_citations": 5,
+      "gold_in_context": true,
+      "gold_hit_rank": 1,
+      "invalid_refs": [],
+      "uncited_sentences": 8,
+      "sentence_count": 8,
+      "usage": {
+        "prompt_tokens": 1619,
+        "completion_tokens": 69,
+        "total_tokens": 1688,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 1619
+      },
+      "latency_ms": 1074,
+      "judge": {
+        "supported": 8,
+        "total": 8,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 1430,
+          "completion_tokens": 12,
+          "total_tokens": 1442,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1430
+        }
+      }
+    },
+    {
+      "qid": "q015",
+      "question": "求数组中最小的 K 个数，用快速选择（partition）的 Java 实现是什么？",
+      "category": "代码类",
+      "difficulty": "medium",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 1346,
+      "n_citations": 4,
+      "gold_in_context": false,
+      "gold_hit_rank": 2,
+      "invalid_refs": [],
+      "uncited_sentences": 32,
+      "sentence_count": 37,
+      "usage": {
+        "prompt_tokens": 1521,
+        "completion_tokens": 487,
+        "total_tokens": 2008,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 1521
+      },
+      "latency_ms": 2360,
+      "judge": {
+        "supported": 28,
+        "total": 30,
+        "ratio": 0.9333,
+        "unsupported": [
+          {
+            "id": 20,
+            "why": "参考段落中该分支为 l = j + 1，此处缺失",
+            "sentence": "else"
+          },
+          {
+            "id": 30,
+            "why": "参考段落中 swap 后还有 return j，此处缺失",
+            "sentence": "swap(nums, l, j);"
+          }
+        ],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 1691,
+          "completion_tokens": 62,
+          "total_tokens": 1753,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1691
+        }
+      }
+    },
+    {
+      "qid": "q016",
+      "question": "LeetCode 704 二分查找，左闭右闭区间那版的 C++ 代码怎么写？while 里为什么用 <= ？",
+      "category": "代码类",
+      "difficulty": "medium",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 186,
+      "n_citations": 5,
+      "gold_in_context": false,
+      "gold_hit_rank": 0,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 2,
+      "usage": {
+        "prompt_tokens": 2051,
+        "completion_tokens": 86,
+        "total_tokens": 2137,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 2051
+      },
+      "latency_ms": 1739,
+      "judge": {
+        "supported": 1,
+        "total": 2,
+        "ratio": 0.5,
+        "unsupported": [
+          {
+            "id": 1,
+            "why": "段落[1]含C++代码，虽为右边界版，但说无C++代码不准确",
+            "sentence": "资料中没有 LeetCode 704 左闭右闭区间的 C++ 代码，只提供了 JavaScript、TypeScript、Ruby 版本 [2][3][4][5]。"
+          }
+        ],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 1895,
+          "completion_tokens": 47,
+          "total_tokens": 1942,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1895
+        }
+      }
+    },
+    {
+      "qid": "q017",
+      "question": "用 BFS 广搜做「岛屿数量」为什么会超时？标记 visited 的正确时机是什么？",
+      "category": "代码类",
+      "difficulty": "medium",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 104,
+      "n_citations": 4,
+      "gold_in_context": true,
+      "gold_hit_rank": 1,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 2,
+      "usage": {
+        "prompt_tokens": 1825,
+        "completion_tokens": 51,
+        "total_tokens": 1876,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 1825
+      },
+      "latency_ms": 1514,
+      "judge": {
+        "supported": 2,
+        "total": 2,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 1653,
+          "completion_tokens": 12,
+          "total_tokens": 1665,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1653
+        }
+      }
+    },
+    {
+      "qid": "q018",
+      "question": "01 背包和完全背包都用一维 dp 数组时，两层 for 循环的先后顺序分别有什么讲究？",
+      "category": "跨节综合",
+      "difficulty": "hard",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 232,
+      "n_citations": 5,
+      "gold_in_context": true,
+      "gold_hit_rank": 1,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 3,
+      "usage": {
+        "prompt_tokens": 2224,
+        "completion_tokens": 144,
+        "total_tokens": 2368,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 2224
+      },
+      "latency_ms": 1504,
+      "judge": {
+        "supported": 3,
+        "total": 3,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 2139,
+          "completion_tokens": 12,
+          "total_tokens": 2151,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 2139
+        }
+      }
+    },
+    {
+      "qid": "q019",
+      "question": "HashMap 的 put 方法在什么条件下会把链表转成红黑树？转完再变大变小会退回去吗？",
+      "category": "跨节综合",
+      "difficulty": "hard",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 175,
+      "n_citations": 3,
+      "gold_in_context": false,
+      "gold_hit_rank": 0,
+      "invalid_refs": [],
+      "uncited_sentences": 1,
+      "sentence_count": 2,
+      "usage": {
+        "prompt_tokens": 1841,
+        "completion_tokens": 100,
+        "total_tokens": 1941,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 1841
+      },
+      "latency_ms": 1716,
+      "judge": {
+        "supported": 2,
+        "total": 2,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 1764,
+          "completion_tokens": 12,
+          "total_tokens": 1776,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1764
+        }
+      }
+    },
+    {
+      "qid": "q020",
+      "question": "从一条 SQL 执行到查不出结果，索引失效的常见原因有哪些？LIKE 以 % 开头为什么用不上索引？",
+      "category": "跨节综合",
+      "difficulty": "hard",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 353,
+      "n_citations": 5,
+      "gold_in_context": true,
+      "gold_hit_rank": 5,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 3,
+      "usage": {
+        "prompt_tokens": 2216,
+        "completion_tokens": 215,
+        "total_tokens": 2431,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 2216
+      },
+      "latency_ms": 1974,
+      "judge": {
+        "supported": 3,
+        "total": 3,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 2228,
+          "completion_tokens": 12,
+          "total_tokens": 2240,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 2228
+        }
+      }
+    },
+    {
+      "qid": "q021",
+      "question": "三数之和为什么需要排序？去重分别发生在哪几个位置？",
+      "category": "跨节综合",
+      "difficulty": "hard",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 185,
+      "n_citations": 5,
+      "gold_in_context": true,
+      "gold_hit_rank": 1,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 2,
+      "usage": {
+        "prompt_tokens": 1742,
+        "completion_tokens": 127,
+        "total_tokens": 1869,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 1742
+      },
+      "latency_ms": 2176,
+      "judge": {
+        "supported": 2,
+        "total": 2,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 1627,
+          "completion_tokens": 12,
+          "total_tokens": 1639,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1627
+        }
+      }
+    },
+    {
+      "qid": "q022",
+      "question": "LeetCode 142 环形链表 II，快慢指针相遇后怎么找入环点？",
+      "category": "干扰项",
+      "difficulty": "hard",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 201,
+      "n_citations": 4,
+      "gold_in_context": true,
+      "gold_hit_rank": 1,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 3,
+      "usage": {
+        "prompt_tokens": 1824,
+        "completion_tokens": 106,
+        "total_tokens": 1930,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 1824
+      },
+      "latency_ms": 1824,
+      "judge": {
+        "supported": 3,
+        "total": 3,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 1717,
+          "completion_tokens": 12,
+          "total_tokens": 1729,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1717
+        }
+      }
+    },
+    {
+      "qid": "q023",
+      "question": "用递归两两交换链表中的相邻节点，怎么用虚拟头结点避免单独处理头指针？",
+      "category": "干扰项",
+      "difficulty": "hard",
+      "refused": true,
+      "refuse_reason": "资料不足",
+      "answer_chars": 21,
+      "n_citations": 0,
+      "gold_in_context": false,
+      "gold_hit_rank": 1,
+      "invalid_refs": [],
+      "uncited_sentences": 1,
+      "sentence_count": 1,
+      "usage": {
+        "prompt_tokens": 2020,
+        "completion_tokens": 5,
+        "total_tokens": 2025,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 2020
+      },
+      "latency_ms": 903,
+      "judge": {}
+    },
+    {
+      "qid": "q024",
+      "question": "Reverse Linked List 这道题，迭代和递归两种写法的时间、空间复杂度分别是多少？",
+      "category": "干扰项",
+      "difficulty": "hard",
+      "refused": true,
+      "refuse_reason": "资料不足",
+      "answer_chars": 21,
+      "n_citations": 0,
+      "gold_in_context": false,
+      "gold_hit_rank": 0,
+      "invalid_refs": [],
+      "uncited_sentences": 1,
+      "sentence_count": 1,
+      "usage": {
+        "prompt_tokens": 1749,
+        "completion_tokens": 5,
+        "total_tokens": 1754,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 1749
+      },
+      "latency_ms": 1023,
+      "judge": {}
+    },
+    {
+      "qid": "q025",
+      "question": "happy-llm 第五章里 LLaMA2 的 RMSNorm 是怎么实现的？数学公式是什么，为什么说它比 LayerNorm 省？",
+      "category": "术语精确匹配",
+      "difficulty": "easy",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 585,
+      "n_citations": 4,
+      "gold_in_context": true,
+      "gold_hit_rank": 1,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 5,
+      "usage": {
+        "prompt_tokens": 1664,
+        "completion_tokens": 287,
+        "total_tokens": 1951,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 1664
+      },
+      "latency_ms": 2295,
+      "judge": {
+        "supported": 5,
+        "total": 5,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 1636,
+          "completion_tokens": 12,
+          "total_tokens": 1648,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1636
+        }
+      }
+    },
+    {
+      "qid": "q026",
+      "question": "为什么用海量文本做无监督预训练之后，模型反而会在某些任务上变差？除了全量微调，能不能只训练一小部分参数就把它调回来？",
+      "category": "同义改写",
+      "difficulty": "medium",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 182,
+      "n_citations": 5,
+      "gold_in_context": true,
+      "gold_hit_rank": 1,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 1,
+      "usage": {
+        "prompt_tokens": 2618,
+        "completion_tokens": 99,
+        "total_tokens": 2717,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 2618
+      },
+      "latency_ms": 2164,
+      "judge": {
+        "supported": 1,
+        "total": 1,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 2366,
+          "completion_tokens": 12,
+          "total_tokens": 2378,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 2366
+        }
+      }
+    },
+    {
+      "qid": "q027",
+      "question": "怎么让模型在预测时只看得到前面的词、看不到后面的词？为什么要这么设计，代码上怎么造出那个遮蔽矩阵？",
+      "category": "同义改写",
+      "difficulty": "easy",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 511,
+      "n_citations": 3,
+      "gold_in_context": true,
+      "gold_hit_rank": 1,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 5,
+      "usage": {
+        "prompt_tokens": 2102,
+        "completion_tokens": 237,
+        "total_tokens": 2339,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 2102
+      },
+      "latency_ms": 2320,
+      "judge": {
+        "supported": 5,
+        "total": 5,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 2104,
+          "completion_tokens": 12,
+          "total_tokens": 2116,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 2104
+        }
+      }
+    },
+    {
+      "qid": "q028",
+      "question": "RLHF 和 DPO 有什么区别？为什么说 DPO 不需要单独训练奖励模型？KTO 又是什么定位？",
+      "category": "中英混杂",
+      "difficulty": "easy",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 338,
+      "n_citations": 4,
+      "gold_in_context": true,
+      "gold_hit_rank": 1,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 4,
+      "usage": {
+        "prompt_tokens": 1891,
+        "completion_tokens": 196,
+        "total_tokens": 2087,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 1891
+      },
+      "latency_ms": 1665,
+      "judge": {
+        "supported": 4,
+        "total": 4,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 1825,
+          "completion_tokens": 12,
+          "total_tokens": 1837,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1825
+        }
+      }
+    },
+    {
+      "qid": "q029",
+      "question": "LLaMA2 里 GQA（分组查询注意力）是怎么实现的？n_kv_heads 和 n_rep 分别是什么，K/V 为什么要 repeat 到和 Q 一样多？",
+      "category": "中英混杂",
+      "difficulty": "medium",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 413,
+      "n_citations": 5,
+      "gold_in_context": true,
+      "gold_hit_rank": 2,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 4,
+      "usage": {
+        "prompt_tokens": 2648,
+        "completion_tokens": 228,
+        "total_tokens": 2876,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 2648
+      },
+      "latency_ms": 2478,
+      "judge": {
+        "supported": 4,
+        "total": 4,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 2518,
+          "completion_tokens": 12,
+          "total_tokens": 2530,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 2518
+        }
+      }
+    },
+    {
+      "qid": "q030",
+      "question": "自己 LoRA 微调出来的模型想丢给 Ollama 本地跑，该走哪几步？基础模型和 LoRA 适配器分别怎么转，Modelfile 里要写哪些字段？",
+      "category": "中英混杂",
+      "difficulty": "medium",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 723,
+      "n_citations": 5,
+      "gold_in_context": true,
+      "gold_hit_rank": 1,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 6,
+      "usage": {
+        "prompt_tokens": 1914,
+        "completion_tokens": 329,
+        "total_tokens": 2243,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 1914
+      },
+      "latency_ms": 2145,
+      "judge": {
+        "supported": 6,
+        "total": 6,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 1927,
+          "completion_tokens": 12,
+          "total_tokens": 1939,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1927
+        }
+      }
+    },
+    {
+      "qid": "q031",
+      "question": "从零实现 SFT 训练时，多轮对话数据集是怎么构造的？怎么做到只对 assistant 的回答算 loss，不计算用户提问部分的 loss？",
+      "category": "代码类",
+      "difficulty": "medium",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 514,
+      "n_citations": 4,
+      "gold_in_context": true,
+      "gold_hit_rank": 3,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 7,
+      "usage": {
+        "prompt_tokens": 2446,
+        "completion_tokens": 273,
+        "total_tokens": 2719,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 2446
+      },
+      "latency_ms": 2160,
+      "judge": {
+        "supported": 7,
+        "total": 7,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 2438,
+          "completion_tokens": 12,
+          "total_tokens": 2450,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 2438
+        }
+      }
+    },
+    {
+      "qid": "q032",
+      "question": "HashMap 的 putVal 源码里，什么条件下会走到 treeifyBin？为什么方法名是 treeifyBin 而不是直接转树？",
+      "category": "代码类",
+      "difficulty": "hard",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 205,
+      "n_citations": 3,
+      "gold_in_context": false,
+      "gold_hit_rank": 3,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 3,
+      "usage": {
+        "prompt_tokens": 2096,
+        "completion_tokens": 108,
+        "total_tokens": 2204,
+        "prompt_tokens_details": {
+          "cached_tokens": 128
+        },
+        "prompt_cache_hit_tokens": 128,
+        "prompt_cache_miss_tokens": 1968
+      },
+      "latency_ms": 1440,
+      "judge": {
+        "supported": 3,
+        "total": 3,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 2024,
+          "completion_tokens": 12,
+          "total_tokens": 2036,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 2024
+        }
+      }
+    },
+    {
+      "qid": "q033",
+      "question": "Transformer 的 Decoder 层里第一个注意力层和 Encoder 里的自注意力差在哪？它怎么保证每个 token 只能看到自己之前的注意力分数，代码上靠什么参数控制？",
+      "category": "跨节综合",
+      "difficulty": "hard",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 266,
+      "n_citations": 5,
+      "gold_in_context": true,
+      "gold_hit_rank": 1,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 3,
+      "usage": {
+        "prompt_tokens": 1806,
+        "completion_tokens": 120,
+        "total_tokens": 1926,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 1806
+      },
+      "latency_ms": 1577,
+      "judge": {
+        "supported": 2,
+        "total": 3,
+        "ratio": 0.6667,
+        "unsupported": [
+          {
+            "id": 3,
+            "why": "段落仅提Encoder传is_causal=False，未说Decoder启用该参数",
+            "sentence": "代码上通过 is_causal 参数控制，Decoder 的掩码自注意力对应启用该参数，而 Encoder 传入 is_causal=False [4]。"
+          }
+        ],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 1647,
+          "completion_tokens": 40,
+          "total_tokens": 1687,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1647
+        }
+      }
+    },
+    {
+      "qid": "q034",
+      "question": "从零实现 LLaMA2 的 Attention 时，手动算注意力和用 Flash Attention 两条分支是怎么切换的？不支持 Flash Attention 时遮住未来 token 的 mask 怎么造？",
+      "category": "跨节综合",
+      "difficulty": "hard",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 462,
+      "n_citations": 4,
+      "gold_in_context": true,
+      "gold_hit_rank": 1,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 2,
+      "usage": {
+        "prompt_tokens": 1946,
+        "completion_tokens": 194,
+        "total_tokens": 2140,
+        "prompt_tokens_details": {
+          "cached_tokens": 128
+        },
+        "prompt_cache_hit_tokens": 128,
+        "prompt_cache_miss_tokens": 1818
+      },
+      "latency_ms": 1864,
+      "judge": {
+        "supported": 2,
+        "total": 2,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 1830,
+          "completion_tokens": 12,
+          "total_tokens": 1842,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1830
+        }
+      }
+    },
+    {
+      "qid": "q035",
+      "question": "vLLM 启动参数里的 --tensor-parallel-size 4 是什么意思？--gpu-memory-utilization 和 --max-model-len 这两个参数又各管什么？",
+      "category": "代码类",
+      "difficulty": "easy",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 304,
+      "n_citations": 5,
+      "gold_in_context": true,
+      "gold_hit_rank": 2,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 3,
+      "usage": {
+        "prompt_tokens": 2117,
+        "completion_tokens": 168,
+        "total_tokens": 2285,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 2117
+      },
+      "latency_ms": 1843,
+      "judge": {
+        "supported": 3,
+        "total": 3,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 1898,
+          "completion_tokens": 12,
+          "total_tokens": 1910,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1898
+        }
+      }
+    },
+    {
+      "qid": "q036",
+      "question": "SGLang 的 RadixAttention 和 vLLM 的 PagedAttention 解决的是不是同一件事？各自优化的是什么？",
+      "category": "中英混杂",
+      "difficulty": "medium",
+      "refused": true,
+      "refuse_reason": "资料不足",
+      "answer_chars": 21,
+      "n_citations": 0,
+      "gold_in_context": false,
+      "gold_hit_rank": 0,
+      "invalid_refs": [],
+      "uncited_sentences": 1,
+      "sentence_count": 1,
+      "usage": {
+        "prompt_tokens": 1896,
+        "completion_tokens": 75,
+        "total_tokens": 1971,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 1896
+      },
+      "latency_ms": 1375,
+      "judge": {}
+    },
+    {
+      "qid": "q037",
+      "question": "显存只有 24G，想在 DeepSeek-7B-chat 上做 4bit 量化微调，from_pretrained 那几行该怎么写？bnb_4bit_compute_dtype、bnb_4bit_quant_type 分别是什么意思？",
+      "category": "代码类",
+      "difficulty": "medium",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 1167,
+      "n_citations": 5,
+      "gold_in_context": true,
+      "gold_hit_rank": 1,
+      "invalid_refs": [],
+      "uncited_sentences": 18,
+      "sentence_count": 21,
+      "usage": {
+        "prompt_tokens": 1785,
+        "completion_tokens": 466,
+        "total_tokens": 2251,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 1785
+      },
+      "latency_ms": 2131,
+      "judge": {
+        "supported": 21,
+        "total": 21,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 1940,
+          "completion_tokens": 12,
+          "total_tokens": 1952,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1940
+        }
+      }
+    },
+    {
+      "qid": "q038",
+      "question": "自己微调一个检索用的 embedding 模型，训练数据长什么样、batch 为什么尽量开大、temperature 又要调小？这几件事之间是什么关系？",
+      "category": "跨节综合",
+      "difficulty": "hard",
+      "refused": true,
+      "refuse_reason": "资料不足",
+      "answer_chars": 21,
+      "n_citations": 0,
+      "gold_in_context": false,
+      "gold_hit_rank": 2,
+      "invalid_refs": [],
+      "uncited_sentences": 1,
+      "sentence_count": 1,
+      "usage": {
+        "prompt_tokens": 1630,
+        "completion_tokens": 229,
+        "total_tokens": 1859,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 1630
+      },
+      "latency_ms": 2488,
+      "judge": {}
+    },
+    {
+      "qid": "q039",
+      "question": "用 peft 配 LoRA 时 target_modules 到底要不要自己指定？给 LLaMA 类模型做指令微调时，教程里手写的五个层名是哪几个？",
+      "category": "干扰项",
+      "difficulty": "hard",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 162,
+      "n_citations": 5,
+      "gold_in_context": true,
+      "gold_hit_rank": 2,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 2,
+      "usage": {
+        "prompt_tokens": 2117,
+        "completion_tokens": 87,
+        "total_tokens": 2204,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 2117
+      },
+      "latency_ms": 1355,
+      "judge": {
+        "supported": 2,
+        "total": 2,
+        "ratio": 1.0,
+        "unsupported": [],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 1870,
+          "completion_tokens": 12,
+          "total_tokens": 1882,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 1870
+        }
+      }
+    },
+    {
+      "qid": "q040",
+      "question": "LoRA 到底在训练哪两个矩阵？它们怎么初始化，为什么这么初始化不会把原模型带偏？可训练参数量怎么估？",
+      "category": "干扰项",
+      "difficulty": "hard",
+      "refused": false,
+      "refuse_reason": "",
+      "answer_chars": 344,
+      "n_citations": 5,
+      "gold_in_context": true,
+      "gold_hit_rank": 1,
+      "invalid_refs": [],
+      "uncited_sentences": 0,
+      "sentence_count": 5,
+      "usage": {
+        "prompt_tokens": 2265,
+        "completion_tokens": 206,
+        "total_tokens": 2471,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 2265
+      },
+      "latency_ms": 1840,
+      "judge": {
+        "supported": 4,
+        "total": 5,
+        "ratio": 0.8,
+        "unsupported": [
+          {
+            "id": 4,
+            "why": "段落未说明零初始化导致输出一致、不带偏",
+            "sentence": "由于 B 初始为零，训练开始时 ΔW = BA 为零，因此初始前向输出与原始冻结模型一致，不会把原模型带偏 [1]。"
+          }
+        ],
+        "error": "",
+        "usage": {
+          "prompt_tokens": 2130,
+          "completion_tokens": 35,
+          "total_tokens": 2165,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 2130
+        }
+      }
+    }
+  ]
+}

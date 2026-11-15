@@ -421,8 +421,11 @@ class TestAnswerer(unittest.TestCase):
         self.assertNotIn("collections", retriever.calls[0])
 
     def test_insufficient_marker_refuses(self):
+        # 默认会做「拒答复核」（见 tests/test_refusal_retry.py），这里要验的是
+        # 「标记 -> 拒答」本身，所以显式关掉复核，保证只问一次模型。
         answerer, _, fake = self._answerer(
-            [make_hit(1), make_hit(2)], "INSUFFICIENT")
+            [make_hit(1), make_hit(2)], "INSUFFICIENT",
+            cfg={"refusal_retry": False})
         ans = answerer.answer("如何做法式红酒炖牛肉", top_k=2)
         self.assertTrue(ans.refused)
         self.assertEqual(ans.refuse_reason, REFUSE_INSUFFICIENT)

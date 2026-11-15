@@ -41,14 +41,16 @@ from __future__ import annotations
 import logging
 import time
 
+from ..retrieve.tokenize import tokenize
 from ..retrieve.types import SearchHit
-from .cite import count_uncited, invalid_refs
+from .cite import GAP_PREFIX, count_uncited, invalid_refs, split_sentences
 from .llm import LLMClient
 from .prompt import (
     INSUFFICIENT,
     build_messages,
     DEFAULT_MAX_CHUNK_CHARS,
     DEFAULT_MAX_CONTEXT_CHARS,
+    RETRY_AFTER_INSUFFICIENT,
     select_hits,
 )
 from .types import Answer, Citation, REFUSE_TEXT
@@ -79,10 +81,67 @@ DEFAULT_CFG: dict = {
     "max_chunk_chars": DEFAULT_MAX_CHUNK_CHARS,
     "top_k": 5,
     "min_top_score": 0.0,
+    # 模型说「资料不足」之后，再问一次（见 prompt.RETRY_AFTER_INSUFFICIENT）。
+    #
+    # `refusal_retry_min_coverage` 默认 0 = 一律复核。原本想用「问题关键词在上下文
+    # 里的覆盖度」当闸门，实测这个信号不成立：40 道评测题的覆盖度中位数 0.55、
+    # 最低 0.30，而「今天天气怎么样」「你好」这类域外问题反而是 1.00 —— 中文 bigram
+    # 在 1,150 万字的语料里几乎全能命中，覆盖率区分不出「域外」和「域内」。
+    # 留着这个开关是为了将来换成语料内 IDF 加权覆盖度再试，不是现在的判据。
+    "refusal_retry": True,
+    "refusal_retry_min_coverage": 0.0,
 }
 
 # 这些 source 的 score 不是可比的相似度，阈值对它们无效。
 _THRESHOLDLESS_SOURCES = ("hybrid", "rerank")
+
+
+def _keyword_coverage(question: str, hits: list[SearchHit]) -> float:
+    """问题里的关键词有多大比例出现在检索到的上下文里。
+
+    用检索同一套分词，但只保留长度 > 1 的 token：中文单字（「是」「的」「么」）
+    在任何上下文里都会命中，算进去只会把这个指标抬到没意义的水平。
+
+    **不要拿它当闸门**：实测「今天天气怎么样」「你好」在技术语料上也是 1.00，
+    因为中文 bigram 在 1150 万字的语料里几乎全能命中。它现在只是日志里的一个
+    诊断量，真正决定要不要复核的是 `refusal_retry_min_coverage`（默认 0 = 一律复核）。
+    """
+    wanted = {tok for tok in tokenize(question) if len(tok) > 1}
+    if not wanted:
+        return 0.0
+    context = " ".join(hit.text or "" for hit in hits)
+    return len(wanted & set(tokenize(context))) / len(wanted)
+
+
+def _merge_usage(first: dict, second: dict) -> dict:
+    """两次调用的 usage 相加。数字类字段逐项累加，其它字段保留第一次的值。"""
+    merged = dict(first or {})
+    for key, value in (second or {}).items():
+        if isinstance(value, (int, float)) and isinstance(merged.get(key), (int, float)):
+            merged[key] = merged[key] + value
+        elif key not in merged:
+            merged[key] = value
+    return merged
+
+
+def _gap_lines(text: str) -> list[str]:
+    """取出「资料未覆盖：X」这类缺口声明行。"""
+    return [line.strip() for line in (text or "").splitlines()
+            if line.strip().startswith(GAP_PREFIX)]
+
+
+def _is_gap_only(text: str) -> bool:
+    """整段回答是不是只有缺口声明（没有任何实质论断）。
+
+    复核之后的模型有时只写一行「资料未覆盖：<整个问题>」—— 这在语义上就是拒答，
+    不该算成「答出来了」。把它判成拒答，同时把缺什么留下来给用户看，
+    比只回一句「没有找到足够的信息」有信息量。
+    """
+    if not _gap_lines(text):
+        return False
+    rest = "\n".join(line for line in (text or "").splitlines()
+                     if not line.strip().startswith(GAP_PREFIX))
+    return not split_sentences(rest)
 
 
 class Answerer:
@@ -145,9 +204,37 @@ class Answerer:
         text = (text or "").strip()
         usage = dict(usage or {})
 
+        retried = False
         if INSUFFICIENT in text:
-            return self._refuse(question, REFUSE_INSUFFICIENT, hits, t0,
-                                usage=usage, context_chunks=len(context_hits))
+            coverage = _keyword_coverage(question, context_hits)
+            gate = float(self.cfg["refusal_retry_min_coverage"] or 0.0)
+            if not self.cfg["refusal_retry"] or coverage < gate:
+                # 覆盖度不够 = 真的没资料，再问一次只会多花钱
+                return self._refuse(question, REFUSE_INSUFFICIENT, hits, t0,
+                                    usage=usage, context_chunks=len(context_hits),
+                                    detail=f"关键词覆盖 {coverage:.2f} < {gate:.2f}")
+
+            retry_text, retry_usage = self.llm.complete(
+                list(messages) + [{"role": "user", "content": RETRY_AFTER_INSUFFICIENT}],
+                temperature=float(self.cfg["temperature"]),
+                max_tokens=int(self.cfg["max_tokens"]),
+            )
+            retry_text = (retry_text or "").strip()
+            # 两次调用的 token 都要算进去，否则 usage 会低估一半
+            usage = _merge_usage(usage, retry_usage)
+            if not retry_text or INSUFFICIENT in retry_text:
+                return self._refuse(question, REFUSE_INSUFFICIENT, hits, t0,
+                                    usage=usage, context_chunks=len(context_hits),
+                                    detail=f"复核后仍拒答（覆盖 {coverage:.2f}）")
+            if _is_gap_only(retry_text):
+                # 只写「资料未覆盖：X」等于拒答，但把缺口带上，用户知道缺什么
+                return self._refuse(question, REFUSE_INSUFFICIENT, hits, t0,
+                                    usage=usage, context_chunks=len(context_hits),
+                                    detail=f"复核后只声明缺口（覆盖 {coverage:.2f}）",
+                                    extra="\n".join(_gap_lines(retry_text)),
+                                    refusal_retried=True)
+            text = retry_text
+            retried = True
 
         citations = [
             Citation.from_hit(hit, ref=i, max_chars=int(self.cfg["max_chunk_chars"]))
@@ -169,6 +256,7 @@ class Answerer:
             uncited_sentences=uncited,
             sentence_count=n_sentences,
             context_chunks=len(citations),
+            refusal_retried=retried,
         )
 
     # ------------------------------------------------------------ 内部
@@ -211,12 +299,18 @@ class Answerer:
 
     def _refuse(self, question: str, reason: str, hits: list[SearchHit],
                 t0: float, *, detail: str = "", usage: dict | None = None,
-                context_chunks: int = 0) -> Answer:
-        """构造拒答结果。正文固定一句人话，不做引用统计。"""
+                context_chunks: int = 0, extra: str = "",
+                refusal_retried: bool = False) -> Answer:
+        """构造拒答结果。正文固定一句人话，不做引用统计。
+
+        `extra` 是补充说明（例如复核后模型声明了哪些子问题资料未覆盖），
+        接在固定话术后面另起一行 —— 用户至少知道缺的是什么。
+        """
         log.info("拒答：%s（%s）", reason, detail or "-")
+        text = REFUSE_TEXT if not extra else f"{REFUSE_TEXT}\n{extra}"
         return Answer(
             question=question,
-            text=REFUSE_TEXT,
+            text=text,
             citations=[],
             refused=True,
             refuse_reason=reason,
@@ -225,6 +319,7 @@ class Answerer:
             usage=dict(usage or {}),
             latency_ms=_elapsed_ms(t0),
             context_chunks=context_chunks,
+            refusal_retried=refusal_retried,
         )
 
 

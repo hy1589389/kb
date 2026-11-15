@@ -28,6 +28,7 @@ __all__ = [
     "invalid_refs",
     "split_sentences",
     "count_uncited",
+    "GAP_PREFIX",
     "MIN_SENTENCE_CHARS",
 ]
 
@@ -38,6 +39,11 @@ _REF_RE = re.compile(r"\[(\d{1,4})\]")
 
 # 去掉引用标记后，字符数低于这个值的残句不计入统计。
 MIN_SENTENCE_CHARS = 4
+
+# 「资料未覆盖」这类句子不是事实主张，是**声明缺口**：拒答复核之后模型会写
+# 「资料未覆盖：<子问题>」，这句本来就该没有 [n]，也不该被逐句忠实度判定当成
+# 编造。所以切句和引用统计都把它排除掉。
+GAP_PREFIX = "资料未覆盖"
 
 _SENT_END = "。！？\n"
 
@@ -62,6 +68,9 @@ def _is_meaningful(sentence: str) -> bool:
     if not raw:
         return False
     if raw.startswith(_STRUCTURAL_PREFIXES):
+        return False
+    if raw.startswith(GAP_PREFIX):
+        # 「资料未覆盖：X」是缺口声明，不是需要引用的论断
         return False
     body = _REF_RE.sub("", raw)
     # 只留下字母 / 数字 / 汉字，标点和空白不算长度

@@ -108,6 +108,9 @@ class Answer:
     sentence_count: int = 0
     # 实际送进提示词的块数（受 max_context_chars 限制，<= len(hits)）
     context_chunks: int = 0
+    # 这次回答是不是「拒答复核」之后的第二次调用（第一次只回了 INSUFFICIENT）。
+    # 评测要能把这类答案单独挑出来：它们的 token 花了两倍，质量也可能不同。
+    refusal_retried: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -124,6 +127,7 @@ class Answer:
             "uncited_sentences": int(self.uncited_sentences),
             "sentence_count": int(self.sentence_count),
             "context_chunks": int(self.context_chunks),
+            "refusal_retried": bool(self.refusal_retried),
         }
 
     def render(self) -> str:
