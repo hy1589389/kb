@@ -1111,19 +1111,9 @@ def cmd_web(args: argparse.Namespace) -> int:
     load_sec = time.perf_counter() - started
     print(f"  索引就绪 : {load_sec:.1f}s")
 
-    warmed = time.perf_counter()
-    try:
-        # 预热只跑一次，且不传 collections：所有集合一起查，顺带把每条链路的
-        # 首次编码、BM25 打分都走一遍
-        retriever.search("预热", top_k=1)
-    except (FileNotFoundError, RuntimeError, ValueError) as exc:
-        print(f"[X] 模型预热失败：{exc}")
-        if "模型目录不存在" in str(exc):
-            print("    用 --model-dir 指向 bge-m3 目录（例如 G:\\kb\\models\\bge-m3）。")
-        return 2
-    warm_sec = time.perf_counter() - warmed
-    print(f"  模型就绪 : {warm_sec:.1f}s（预热检索）")
-
+    # 价格和有没有 key 无关：没 key 时成本就是 0，但配置照样要读出来，
+    # 否则「有 key 才显示成本」会让 /metrics 的字段随环境变化。
+    gc = _load_generate_config(args)
     answerer = None
     llm = None
     answer_state = "未启用（没有可用的模型客户端）"
@@ -1131,7 +1121,6 @@ def cmd_web(args: argparse.Namespace) -> int:
         from .generate.llm import DeepSeekClient, KeyNotFoundError, LLMError
         from .generate.pipeline import Answerer
 
-        gc = _load_generate_config(args)
         llm = DeepSeekClient(
             model=gc.model,
             base_url=gc.base_url,
@@ -1149,19 +1138,54 @@ def cmd_web(args: argparse.Namespace) -> int:
     print(f"  问答     : {answer_state}")
     print("-" * 68)
 
+    # 预热状态：端口先监听，模型在后台线程加载。这段时间 /api/health 的 ready
+    # 是 false，前端据此显示「模型加载中」并禁用提问。
+    # 这是为了线上演示：模型要 58 秒才加载完，原来这段端口根本没开，点开链接
+    # 会看到浏览器的「无法访问此网站」，而不是「正在加载」。
+    warmup: dict = {"state": "loading", "seconds": 0.0, "error": ""}
+
     app = create_app(retriever, answerer, raw_dir=raw_dir, editor=editor,
                      default_collections=plan["default"],
-                     review_file=review_path)
+                     review_file=review_path,
+                     prices={"input_per_mtok": gc.price_input_per_mtok,
+                             "output_per_mtok": gc.price_output_per_mtok},
+                     warmup=warmup)
     bank = getattr(app.state, "review", None) or {}
     if bank.get("items"):
         print(f"  复习题库 : {len(bank['items'])} 道失败题（{bank['source']}）")
     else:
         print(f"  复习题库 : 未启用（{bank.get('reason') or '没有题库'}）")
+    print("  模型     : 后台加载中（就绪前 /api/health 报 ready=false）")
     print(f"  打开 {url}    （Ctrl+C 停止服务）")
     print("=" * 68)
     # uvicorn 启动后 stdout 会被它接管（日志走自己的 handler），这里先冲干净：
     # 不加的话输出被管道/重定向时是块缓冲，启动信息会一直卡在缓冲区里。
     sys.stdout.flush()
+
+    def warm_model() -> None:
+        """预热检索：把所有集合的首次编码、BM25 打分各走一遍。
+
+        失败不退出进程：端口已经开了，前端会把 warmup_error 显示出来。
+        静默退出反而让人以为「服务没起来」。
+        """
+        started_warm = time.perf_counter()
+        try:
+            retriever.search("预热", top_k=1)
+        except Exception as exc:  # noqa: BLE001 —— 预热失败的原因要原样告诉用户
+            warmup.update({"state": "failed",
+                           "seconds": time.perf_counter() - started_warm,
+                           "error": str(exc)})
+            print(f"[!] 模型预热失败：{exc}", flush=True)
+            if "模型目录不存在" in str(exc):
+                print("    用 --model-dir 指向 bge-m3 目录（例如 G:\\kb\\models\\bge-m3）。",
+                      flush=True)
+            return
+        warmup.update({"state": "ready",
+                       "seconds": time.perf_counter() - started_warm,
+                       "error": ""})
+        print(f"  模型就绪 : {warmup['seconds']:.1f}s（后台预热完成）", flush=True)
+
+    threading.Thread(target=warm_model, name="kb-warmup", daemon=True).start()
 
     if not args.no_browser:
         # 等 uvicorn 把端口 bind 完再开浏览器，1 秒足够本地启动

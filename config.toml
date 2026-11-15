@@ -124,6 +124,12 @@ min_top_score = 0
 
 timeout = 60           # 单次请求超时（秒）
 
+# 单价：每百万 token 多少元。填了才会算成本，0 = 不换算。
+# 数字按你账号实际的计费口径填（缓存命中/未命中、不同模型都不一样），
+# 代码里不写死任何价格。填完 /api/metrics 里会出现 cost 块。
+price_input_per_mtok = 0
+price_output_per_mtok = 0
+
 # ============================================================
 #  Phase 5 · Web 界面
 #  启  动：python ingest.py web

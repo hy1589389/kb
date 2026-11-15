@@ -213,6 +213,34 @@
 
   .loading { padding: 4px 0 12px; }
   .loading-text { margin: 0 0 12px; text-align: center; color: var(--muted); font-size: 13px; }
+
+  /* ---------- 模型预热提示 ---------- */
+  /* 端口比模型先监听，这 40~60 秒里页面要能打开并说明自己在等什么。
+     原来这段时间浏览器直接「无法访问此网站」，来看演示的人就关掉了。 */
+  .warmup {
+    margin: 0 0 16px; padding: 12px 14px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--panel); color: var(--text);
+  }
+  .warmup-text { margin: 0; font-size: 14px; }
+  .warmup-detail { margin: 6px 0 0 22px; font-size: 12px; color: var(--muted); }
+  .warmup.bad { border-color: var(--bad); color: var(--bad); }
+
+  /* ---------- 示例问题 ---------- */
+  /* 空输入框对第一次来的人是死路：这些题都是从评测集里挑的「能答好的」，
+     点一下就走完整的检索 + 引用链路。 */
+  .examples { margin: 0 0 16px; }
+  .examples-title { margin: 0 0 8px; font-size: 12px; color: var(--muted); }
+  .examples-list { display: flex; flex-wrap: wrap; gap: 8px; }
+  .example-chip {
+    display: inline-flex; align-items: center; gap: 8px;
+    max-width: 100%; padding: 7px 12px;
+    border: 1px solid var(--border); border-radius: 16px;
+    background: var(--panel); color: var(--text);
+    font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+  }
+  .example-chip:hover { border-color: var(--accent); color: var(--accent); }
+  .example-chip:disabled { opacity: .5; cursor: not-allowed; }
+  .example-tag { font-size: 11px; color: var(--muted); white-space: nowrap; }
   .spinner {
     display: inline-block; width: 14px; height: 14px; margin-right: 8px;
     border: 2px solid var(--border); border-top-color: var(--accent);
@@ -570,6 +598,16 @@
 
 <main>
   <div class="wrap">
+    <section id="warmup-banner" class="warmup hidden" role="status" aria-live="polite">
+      <p class="warmup-text"><span class="spinner"></span><span id="warmup-text">模型加载中…</span></p>
+      <p id="warmup-detail" class="warmup-detail hidden"></p>
+    </section>
+
+    <section id="examples" class="examples hidden" aria-label="示例问题">
+      <p class="examples-title">不知道问什么？点一条试试（都来自评测集里答得好的题）</p>
+      <div id="examples-list" class="examples-list"></div>
+    </section>
+
     <section id="empty-state" class="empty">
       <p class="empty-title">输入关键词后回车开始检索</p>
       <ul class="empty-tips">
@@ -678,6 +716,8 @@
     theme: 'auto',
     health: null,
     healthError: null,
+    warmupTimer: null,       // 预热期间的健康检查轮询
+    examples: [],            // 首屏示例问题（来自 /api/examples）
     lastElapsed: null,       // 前端总耗时
     lastServerMs: null,      // 服务端检索耗时
     lastQuery: '',
@@ -1117,6 +1157,8 @@
   }
 
   function resetOutput() {
+    // 一旦发起查询就把示例收起来：结果才是主体，示例留着会把首屏占满
+    hide('examples');
     var results = $('results');
     if (results) {
       results.replaceChildren();
@@ -1903,6 +1945,139 @@
       state.healthError = err.message;
     }
     renderStatus();
+    renderWarmup();
+  }
+
+  /* ================================================================
+   *  模型预热状态
+   *  端口先开、模型后加载：这期间 ready=false，页面要说明在等什么，
+   *  并且不让用户点下去——请求会一直挂着，比直接说「等一下」更糟。
+   * ================================================================ */
+
+  function setBusyDisabled(disabled) {
+    var btn = $('search-btn');
+    var input = $('query-input');
+    if (btn) btn.disabled = !!disabled;
+    if (input) input.disabled = !!disabled;
+    if (btn) btn.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+  }
+
+  function renderWarmup() {
+    var banner = $('warmup-banner');
+    if (!banner) return;
+    var health = state.health;
+    var text = $('warmup-text');
+    var detail = $('warmup-detail');
+
+    // 健康检查本身还没回来 / 失败：不显示预热条，走状态栏那条路
+    if (!health) {
+      banner.classList.add('hidden');
+      return;
+    }
+    if (health.ready) {
+      banner.classList.add('hidden');
+      setBusyDisabled(false);
+      return;
+    }
+    banner.classList.remove('hidden');
+    if (health.warmup_state === 'failed') {
+      banner.classList.add('bad');
+      setBusyDisabled(true);
+      syncExampleDisabled();
+      if (text) text.textContent = '模型加载失败，检索暂不可用';
+      if (detail) {
+        detail.classList.remove('hidden');
+        detail.textContent = health.warmup_error
+          ? '原因：' + health.warmup_error
+          : '查看启动服务的终端输出';
+      }
+      return;
+    }
+    banner.classList.remove('bad');
+    setBusyDisabled(true);
+    syncExampleDisabled();
+    var seconds = Number(health.warmup_seconds || 0);
+    if (text) {
+      text.textContent = '索引已就绪，模型加载中…'
+        + (seconds > 0 ? '（已 ' + seconds.toFixed(0) + ' 秒，通常 60 秒内完成）'
+                       : '（通常 60 秒内完成）');
+    }
+    if (detail) {
+      detail.classList.remove('hidden');
+      detail.textContent = '加载完成后本提示自动消失，无需刷新页面。';
+    }
+  }
+
+  function scheduleWarmupPoll() {
+    if (state.warmupTimer) return;
+    var attempts = 0;
+    state.warmupTimer = setInterval(async function () {
+      attempts += 1;
+      await loadHealth();
+      var health = state.health;
+      if ((health && health.ready) || attempts >= 90) {
+        clearInterval(state.warmupTimer);
+        state.warmupTimer = null;
+      }
+    }, 2000);
+  }
+
+  /* ================================================================
+   *  示例问题
+   *  数据来自 /api/examples（后端 `web/examples.py`），都是评测集里
+   *  支持率 100% 的题。预热没完成时按钮跟着禁用。
+   * ================================================================ */
+
+  var examplesLoaded = false;
+
+  async function loadExamples() {
+    try {
+      var data = await api('/api/examples');
+      state.examples = Array.isArray(data.examples) ? data.examples : [];
+    } catch (err) {
+      state.examples = [];      // 拿不到示例不影响正常搜索
+    }
+    examplesLoaded = true;
+    renderExamples();
+  }
+
+  function syncExampleDisabled() {
+    var wrap = $('examples');
+    if (!wrap) return;
+    var disabled = !!(state.health && state.health.ready === false);
+    Array.prototype.forEach.call(wrap.querySelectorAll('button'), function (btn) {
+      btn.disabled = disabled;
+    });
+  }
+
+  function renderExamples() {
+    var wrap = $('examples');
+    var list = $('examples-list');
+    if (!wrap || !list) return;
+    if (!examplesLoaded || !state.examples || !state.examples.length) {
+      wrap.classList.add('hidden');
+      return;
+    }
+    list.replaceChildren();
+    state.examples.forEach(function (item) {
+      var chip = el('button', 'example-chip');
+      chip.type = 'button';
+      chip.title = (item.mode === 'ask' ? '问答' : '检索') + '：' + item.q;
+      if (item.tag) chip.appendChild(el('span', 'example-tag', item.tag));
+      chip.appendChild(el('span', null, item.q));
+      chip.addEventListener('click', function () { runExample(item); });
+      list.appendChild(chip);
+    });
+    wrap.classList.remove('hidden');
+    syncExampleDisabled();
+  }
+
+  function runExample(item) {
+    if (state.busy) return;
+    var input = $('query-input');
+    if (input) input.value = item.q;
+    if (item.mode === 'search' || item.mode === 'ask') applyMode(item.mode);
+    run();
   }
 
   /* ================================================================
@@ -2400,12 +2575,19 @@
     closeHistory();
     resetOutput();
     showEmpty(emptyTitleForMode(), state.mode === 'search' ? TIPS_SEARCH : TIPS_ASK);
+    renderExamples();          // 切模式等于回到首屏，示例跟着回来
     var input = $('query-input');
     if (input) input.focus();
   }
 
   async function run() {
     if (state.busy) return;
+    // 预热还没完成时不要发请求：请求会在服务端等模型加载完才返回，
+    // 用户看到的是「卡住」，不如直接说明在等什么。
+    if (state.health && state.health.ready === false) {
+      toast('模型还在加载，稍等几秒再试', true);
+      return;
+    }
     var input = $('query-input');
     var query = input ? input.value.trim() : '';
 
@@ -2503,16 +2685,20 @@
     state.rerank = loadRerank();
     applyRerank();
     bindEvents();
-    loadHealth();
+    // health 要先拿到：预热期间要禁用输入并把「在等什么」说清楚
+    await loadHealth();
+    if (!state.health || !state.health.ready) scheduleWarmupPoll();
     // 集合列表要先拿到：chip 的默认选中和「存的集合还在不在」都靠它
     await loadCollections();
+    // 示例问题：第一次打开时的入口，拿不到就静默不显示
+    await loadExamples();
 
     var input = $('query-input');
     var initial = readUrlState();
     if (initial.collections && initial.collections.length) {
       applyCollections(initial.collections);   // 刷新 / 分享链接能恢复集合选择
     }
-    if (initial.q) {
+    if (initial.q && state.health && state.health.ready) {
       if (input) input.value = initial.q;
       applyMode(initial.mode);
       run();                       // 刷新 / 分享链接后自动复现这次查询

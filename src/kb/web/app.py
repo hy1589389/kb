@@ -16,6 +16,8 @@
     GET  /api/health       块数 / embedder / 就绪状态 / 集合列表
     GET  /api/stats        索引统计（按集合分组 + 顶层汇总）
     GET  /api/review/today 今日复习：按日期挑一道评测失败题 + 参考原文
+    GET  /metrics          Prometheus 文本（进程内计数，重启归零）
+    GET  /api/metrics      同一批数据的 JSON：延迟分位 / 计数器 / 最近请求摘要
 
 ## 多集合
 
@@ -57,6 +59,8 @@ from pydantic import BaseModel
 from ..generate.llm import LLMError
 from ..generate.rank import LLMReranker
 from .editor import detect_editor, open_in_editor, resolve_source_path
+from .examples import default_examples, normalize_examples
+from .metrics import Metrics
 from .review import REVIEW_MAX_CHUNKS, load_review_bank, parse_review_day
 
 __all__ = ["create_app", "STATIC_DIR", "TEXT_PREVIEW_CHARS"]
@@ -71,6 +75,9 @@ INDEX_HTML = STATIC_DIR / "index.html"
 TEXT_PREVIEW_CHARS = 400
 
 MAX_TOP_K = 100
+
+# 抓取自己不该被自己计数，否则延迟分位会被 `/metrics` 的请求慢慢污染。
+_UNMETERED = frozenset({"/metrics", "/favicon.ico"})
 
 # 见过的检索结果上限。超过就整体清空而不是做 LRU：这里存的是元数据 +
 # 正文，单条平均 1 KB，5000 条约 5 MB，清空的代价只是「旧 chunk 要重新检索
@@ -401,7 +408,10 @@ def _build_stats(retriever: Any, dirs: Mapping[str, Path | None] | None = None) 
 def create_app(retriever: Any, answerer: Any = None, *,
                raw_dir: Path | str, editor: str | None = None,
                default_collections: list[str] | None = None,
-               review_file: Path | str | None = None) -> FastAPI:
+               review_file: Path | str | None = None,
+               prices: Mapping[str, float] | None = None,
+               warmup: dict | None = None,
+               examples: list[dict] | None = None) -> FastAPI:
     """构造 FastAPI 应用。
 
     参数
@@ -416,8 +426,17 @@ def create_app(retriever: Any, answerer: Any = None, *,
     default_collections : `/api/search` 不传 `collections` 时查哪些集合。留空
                  等于「全部已加载的集合」；传了不存在的名字会被忽略。
     review_file : 评测结果 JSON（`results/run_hybrid.json`），「今日复习」的题库。
-                 不传 / 读不出来时该入口返回 `available=false` 和一句原因，
-                 其它功能不受影响。
+                  不传 / 读不出来时该入口返回 `available=false` 和一句原因，
+                  其它功能不受影响。
+    prices    : 单价（每百万 token 多少元），键是 `input_per_mtok` /
+                  `output_per_mtok` / `cache_hit_per_mtok`。不传或都是 0 时不算
+                  成本，`/metrics` 里就不出现成本指标 —— 用一个猜的价格乘出来
+                  的数比没有更糟。
+    warmup    : 模型预热状态（`{"state": "loading|ready|failed", "seconds": ..,
+                  "error": ..}`）。传进来的字典会被**共享**：后台预热线程改它，
+                  `/api/health` 读它。不传表示「没有预热这回事」（测试和旧调用方）。
+    examples  : 首页示例问题（`[{"q": .., "mode": "search|ask", "tag": ..}]`）。
+                  不传就用 `web/examples.py` 里的默认集合。
     """
     if retriever is None:
         raise ValueError("create_app 需要已经构造好的 retriever，不能传 None")
@@ -459,6 +478,22 @@ def create_app(retriever: Any, answerer: Any = None, *,
     ranker = LLMReranker(getattr(answerer, "llm", None))
     app.state.ranker = ranker
 
+    # 预热状态：端口先监听、模型在后台加载，这期间 /api/health 的 ready 是 false。
+    # 字典是共享对象，调用方（cmd_web 的后台线程）直接改它。
+    app.state.warmup = warmup if warmup is not None else {}
+    app.state.examples = (normalize_examples(examples) if examples is not None
+                          else default_examples())
+
+    # 指标：进程内计数，重启归零（为什么不做持久化写在 metrics.py 的模块注释里）
+    metrics = Metrics()
+    app.state.metrics = metrics
+
+    # 成本单价。0 / 缺失即关闭：不猜价格。
+    input_price = float((prices or {}).get("input_per_mtok") or 0.0)
+    output_price = float((prices or {}).get("output_per_mtok") or 0.0)
+    cache_hit_price = float((prices or {}).get("cache_hit_per_mtok") or 0.0)
+    cost_enabled = input_price > 0 or output_price > 0 or cache_hit_price > 0
+
     hit_cache: dict[str, dict] = {}
     meta_index: dict[str, dict] | None = None
 
@@ -486,21 +521,31 @@ def create_app(retriever: Any, answerer: Any = None, *,
         return hit_cache.get(chunk_id) or from_meta(chunk_id)
 
     def search_hits(query: str, *, top_k: int, use_dense: bool, use_sparse: bool,
-                    selected: list[str], rerank: bool) -> tuple[list, bool, int]:
-        """检索；开了精排就多召回一批交给模型挑。返回 (命中, 是否精排, 候选数)。"""
+                    selected: list[str], rerank: bool) -> tuple[list, bool, int, dict]:
+        """检索；开了精排就多召回一批交给模型挑。
+
+        返回 `(命中, 是否精排, 候选数, 各阶段耗时毫秒)`。耗时拆开记是为了让
+        `/metrics` 能分开回答「检索慢」还是「精排慢」—— 只记一个总数的话，
+        153 ms 里那 130 ms 的查询编码永远看不出占比。
+        """
         candidates = max(top_k, RERANK_CANDIDATES) if (rerank and ranker.available) else top_k
+        retrieve_started = time.perf_counter()
         hits = retriever.search(
             query, top_k=candidates, use_dense=use_dense, use_sparse=use_sparse,
             collections=selected or None,
         )
+        stages = {"retrieve": (time.perf_counter() - retrieve_started) * 1000.0}
         if not (rerank and ranker.available):
-            return hits, False, len(hits)
+            return hits, False, len(hits), stages
 
+        rerank_started = time.perf_counter()
         picked = ranker.rerank(query, hits)
+        # 模型没给判断时这段耗时照样算精排的开销，只是结果退回原顺序
+        stages["rerank"] = (time.perf_counter() - rerank_started) * 1000.0
         if picked is None:
             # 模型没给出可用的判断：原顺序照常返回，别让精排变成单点
-            return hits[:top_k], False, len(hits)
-        return picked[:top_k], True, len(hits)
+            return hits[:top_k], False, len(hits), stages
+        return picked[:top_k], True, len(hits), stages
 
     def to_result(hit: Any, fallback_rank: int) -> dict:
         data = remember(hit)
@@ -604,6 +649,11 @@ def create_app(retriever: Any, answerer: Any = None, *,
             "default": list(app.state.default_collections),
         }
 
+    @app.get("/api/examples")
+    def api_examples() -> dict:
+        """首页示例问题。数据在 `web/examples.py`，这里只做一次浅拷贝。"""
+        return {"examples": [dict(item) for item in app.state.examples]}
+
     @app.get("/api/search")
     def api_search(
         q: str = Query("", description="查询词"),
@@ -626,7 +676,7 @@ def create_app(retriever: Any, answerer: Any = None, *,
         selected = pick_collections(collections)
         started = time.perf_counter()
         try:
-            hits, reranked, candidates = search_hits(
+            hits, reranked, candidates, stages = search_hits(
                 query, top_k=top_k, use_dense=use_dense, use_sparse=use_sparse,
                 selected=selected, rerank=rerank,
             )
@@ -639,12 +689,38 @@ def create_app(retriever: Any, answerer: Any = None, *,
             # 精排后名次是新的，别把检索时的旧名次（1、10、11…）带出去
             for position, item in enumerate(results, start=1):
                 item["rank"] = position
+
+        mode_key = (mode or "hybrid").strip().lower()
+        metrics.incr("kb_search_total",
+                     {"mode": mode_key, "rerank": "1" if reranked else "0"})
+        if not results:
+            # 空召回是最该被看见的信号：索引没加载、分词全没命中、集合选错了
+            metrics.incr("kb_search_empty_total", {"mode": mode_key})
+        metrics.observe("kb_search_latency_ms", stages["retrieve"], {"stage": "retrieve"})
+        if "rerank" in stages:
+            metrics.observe("kb_search_latency_ms", stages["rerank"], {"stage": "rerank"})
+        if results:
+            metrics.observe("kb_search_top_score", results[0]["score"], {"mode": mode_key})
+        metrics.add_trace({
+            "endpoint": "/api/search",
+            "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "q": query[:80],
+            "mode": mode_key,
+            "rerank": reranked,
+            "top_k": top_k,
+            "collections": list(selected),
+            "count": len(results),
+            "top_score": results[0]["score"] if results else 0.0,
+            "elapsed_ms": elapsed_ms,
+            "stages_ms": {name: round(value, 1) for name, value in stages.items()},
+        })
+
         return {
             "query": query,
             # 精排有没有真的生效（没配模型、模型没给出可用判断时是 false）
             "reranked": reranked,
             "candidates": candidates,
-            "mode": (mode or "hybrid").strip().lower(),
+            "mode": mode_key,
             "top_k": top_k,
             "collections": selected,
             "elapsed_ms": elapsed_ms,
@@ -693,6 +769,59 @@ def create_app(retriever: Any, answerer: Any = None, *,
             remember(hit)
         body["elapsed_ms"] = elapsed_ms
         body["collections"] = chosen
+
+        usage = body.get("usage") or {}
+        for kind, key in (("prompt", "prompt_tokens"), ("completion", "completion_tokens")):
+            value = usage.get(key)
+            if isinstance(value, (int, float)) and value > 0:
+                metrics.incr("kb_llm_tokens_total", {"kind": kind}, float(value))
+        if cost_enabled:
+            # 微元 = token 数 × 每百万 token 单价（1 元 = 1e6 微元，约掉 1e6）。
+            # 用整数微元累加，避免浮点在上千次请求后漂出小数尾巴。
+            def add_cost(kind: str, tokens: Any, price: float) -> None:
+                if isinstance(tokens, (int, float)) and tokens > 0 and price > 0:
+                    metrics.incr("kb_llm_cost_micros_total", {"kind": kind},
+                                 float(round(float(tokens) * price)))
+
+            hit = usage.get("prompt_cache_hit_tokens")
+            miss = usage.get("prompt_cache_miss_tokens")
+            if cache_hit_price > 0 and isinstance(hit, (int, float)) and hit > 0:
+                # DeepSeek 把输入拆成命中/未命中两段，命中部分便宜一个量级。
+                # 只有配了 cache_hit 单价才分档，否则整体按 input 单价算 ——
+                # 不然一个「便宜价 × 全部 token」的结果会低估成本。
+                if not isinstance(miss, (int, float)):
+                    miss = max(0.0, float(usage.get("prompt_tokens") or 0) - float(hit))
+                add_cost("prompt_cache_hit", float(hit), cache_hit_price)
+                add_cost("prompt", float(miss), input_price)
+            else:
+                add_cost("prompt", usage.get("prompt_tokens"), input_price)
+            add_cost("completion", usage.get("completion_tokens"), output_price)
+        refused = bool(body.get("refused"))
+        claimed = body.get("hits") or []
+        # 两层拒答：检索层一条都没召回 / 模型层召回了但判断不够
+        stage = "ok" if not refused else ("retrieval" if not claimed else "model")
+        metrics.incr("kb_answer_total",
+                     {"refused": "1" if refused else "0", "stage": stage})
+        invalid = body.get("invalid_refs") or []
+        if invalid:
+            metrics.incr("kb_answer_invalid_refs_total", {}, float(len(invalid)))
+        sentences = int(body.get("sentence_count") or 0)
+        if sentences:
+            metrics.observe("kb_answer_uncited_ratio",
+                            int(body.get("uncited_sentences") or 0) / sentences)
+        metrics.add_trace({
+            "endpoint": "/api/ask",
+            "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "q": question[:80],
+            "collections": chosen,
+            "refused": refused,
+            "stage": stage,
+            "citations": len(body.get("citations") or []),
+            "invalid_refs": len(invalid),
+            "prompt_tokens": usage.get("prompt_tokens", 0),
+            "completion_tokens": usage.get("completion_tokens", 0),
+            "elapsed_ms": elapsed_ms,
+        })
         return body
 
     @app.get("/api/open")
@@ -744,16 +873,19 @@ def create_app(retriever: Any, answerer: Any = None, *,
         model_dir_exists = bool(model_dir) and Path(model_dir).is_dir()
         index_ready = chunks > 0
         # hashing 索引的 embedder 是现成的，不需要模型文件；
-        # onnx 索引只有模型目录在（或已经懒加载过）才算就绪。
-        embedder_ready = (
-            loaded_embedder is not None
-            or "hashing" in recorded.lower()
-            or model_dir_exists
-        )
+        # onnx 索引必须是**真的加载完了**才算就绪：端口现在比模型先起来，
+        # 用「模型目录存在」判就绪会在预热期间谎报 ready=true。
+        embedder_ready = (loaded_embedder is not None
+                          or "hashing" in recorded.lower())
+        warmup_state = app.state.warmup or {}
         return {
             "ok": True,
             "ready": bool(index_ready and embedder_ready),
             "index_ready": index_ready,
+            # loading / ready / failed / ""（没有预热这回事）
+            "warmup_state": str(warmup_state.get("state") or ""),
+            "warmup_seconds": round(float(warmup_state.get("seconds") or 0.0), 1),
+            "warmup_error": str(warmup_state.get("error") or ""),
             "chunks": chunks,
             "collections": list(collection_names),
             "n_collections": len(collection_names),
@@ -834,5 +966,68 @@ def create_app(retriever: Any, answerer: Any = None, *,
             "chunks_source": chunks_source,
             "chunks": chunks,
         }
+
+    # ------------------------------------------------------------- 指标
+
+    def refresh_gauges() -> None:
+        """抓取前刷新瞬时值。块数取启动时算好的集合缓存，不碰磁盘。"""
+        chunks = sum(entry["chunks"] for entry in app.state.collections)
+        metrics.set_gauge("kb_index_chunks", chunks or _count_chunks(retriever))
+        metrics.set_gauge("kb_collections", len(collection_names))
+        metrics.set_gauge("kb_answerer_enabled", 1 if answerer is not None else 0)
+
+    @app.middleware("http")
+    async def measure_http(request: Request, call_next):
+        """一次请求一行：计数（带状态码）+ 端点级延迟。
+
+        标签用路由模板（`/api/search`）而不是原始 URL —— 把查询词带进标签就是
+        把时间序列的数量交给用户输入决定。路由对象要等 `call_next` 之后才在
+        `scope` 里，所以标签是回填的。
+        """
+        started = time.perf_counter()
+        try:
+            response = await call_next(request)
+        except Exception:
+            endpoint = getattr(request.scope.get("route"), "path", "") or request.url.path
+            if endpoint not in _UNMETERED:
+                metrics.record_http(endpoint=endpoint, status=500,
+                                    latency_ms=(time.perf_counter() - started) * 1000.0)
+            raise
+        endpoint = getattr(request.scope.get("route"), "path", "") or request.url.path
+        if endpoint not in _UNMETERED:
+            metrics.record_http(endpoint=endpoint, status=response.status_code,
+                                latency_ms=(time.perf_counter() - started) * 1000.0)
+        return response
+
+    @app.get("/metrics", include_in_schema=False)
+    def api_metrics_text() -> Response:
+        """Prometheus 抓取入口。进程内计数，重启归零。"""
+        refresh_gauges()
+        return Response(metrics.render(),
+                        media_type="text/plain; version=0.0.4; charset=utf-8")
+
+    @app.get("/api/metrics")
+    def api_metrics() -> dict:
+        """同一批数据的 JSON：延迟分位 / 计数器 / 最近 64 条请求摘要 / 成本。"""
+        refresh_gauges()
+        body = metrics.snapshot()
+        micros = {labels.get("kind", ""): value
+                  for labels, value in metrics.counter_values("kb_llm_cost_micros_total")}
+        total_micros = sum(micros.values())
+        answered = sum(value for _, value in metrics.counter_values("kb_answer_total"))
+        body["cost"] = {
+            "configured": cost_enabled,
+            "prices_yuan_per_mtok": {"input": input_price, "output": output_price,
+                                     "cache_hit": cache_hit_price},
+            "micros": {"prompt": micros.get("prompt", 0.0),
+                       "completion": micros.get("completion", 0.0),
+                       "cache_hit": micros.get("prompt_cache_hit", 0.0)},
+            "yuan_total": round(total_micros / 1_000_000, 6),
+            # 没有请求时给 0 而不是 null：前端和脚本少一个分支
+            "yuan_per_answer": (round(total_micros / 1_000_000 / answered, 6)
+                                if answered else 0.0),
+            "answers": int(answered),
+        }
+        return body
 
     return app

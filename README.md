@@ -1,10 +1,23 @@
-﻿# kb
+# kb
 
 本地知识库。把散落各处的 Markdown 文档收进来，切成带标题路径和原文行号的块，
 再用「BM25 + 稠密向量」的混合检索找出来，答案带引用来源。
 
 目前完成到生成：检索 → 大模型 → 带引用的答案。拒答和引用校验在后置步骤里做。
 另有一个本地 Web 界面，可以在浏览器里检索和问答，并把结果直接跳回编辑器。
+
+## 两种用法
+
+| 形态 | 用途 | 谁在用 |
+| --- | --- | --- |
+| 本地 `python ingest.py web` | 日常使用：查文档、面试前用「今日复习」过一遍评测里没检索到的题、结果按行号跳回原文 | 我自己 |
+| 在线 [hy666ys-kb-qa.ms.show](https://hy666ys-kb-qa.ms.show) | 只读演示：证明这条链路能真跑，点开就能问，答案带引用 | 看简历的人 |
+
+在线那份不是长期服务，也不指望有人天天用。语料是 JavaGuide、CS-Notes 这类公开技术笔记，
+模型本来就熟悉这些内容，检索带来的增量主要是「第几段、第几行」，不是「知不知道」。
+要让知识库真正有用，语料得换成模型没见过的东西：自己的项目代码、面试复盘、内部文档。
+
+魔搭免费档会休眠，冷启动约 40 秒加载索引和模型。面试前先点开预热一次。
 
 ## 目录结构
 
@@ -233,6 +246,8 @@ python ingest.py web --index-dir G:\kb\data\index --model-dir G:\kb\models\bge-m
 | GET | `/api/open?chunk_id=...` | 在编辑器打开该块的源文件；未知 id 返回 404 |
 | GET | `/api/health` | 就绪状态、块数、embedder、模型目录、编辑器 |
 | GET | `/api/review/today?day=2026-11-02` | 今日复习：一道评测失败题 + 参考原文；`day` 可选，用来指定日期 |
+| GET | `/metrics` | Prometheus 文本：请求计数、延迟分位、空召回、拒答、token 数、块数 |
+| GET | `/api/metrics` | 同一批数据的 JSON：延迟分位 + 计数器 + 最近 64 条请求摘要 |
 
 Python 侧入口是 `kb.web.app.create_app(retriever, answerer=None, *, raw_dir, editor=None, review_file=None)`。
 `retriever` / `answerer` 由调用方构造好再传进去，`create_app` 自己不做任何加载 ——

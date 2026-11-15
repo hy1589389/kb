@@ -618,6 +618,8 @@ class WebAppTests(TempCorpus):
             "ok", "ready", "index_ready", "chunks", "embedder",
             "embedder_loaded", "model_dir", "model_dir_exists", "index_dir",
             "raw_dir", "raw_dir_exists", "answerer", "editor", "dim",
+            # 后台预热的进度：端口比模型先起来，这期间 ready 是 false
+            "warmup_state", "warmup_seconds", "warmup_error",
             # 多集合：集合名列表 + 数量
             "collections", "n_collections",
         }
@@ -636,6 +638,79 @@ class WebAppTests(TempCorpus):
         self.assertFalse(body["answerer"])
         self.assertEqual(body["raw_dir"], str(self.raw.resolve()))
         self.assertTrue(body["raw_dir_exists"])
+
+    def test_health_reports_warmup_loading_then_ready(self) -> None:
+        """端口比模型先起来：预热期间 ready 必须是 false，加载完才转 true。
+
+        状态字典是共享对象 —— 测试里直接改它，等同后台线程改它。
+        """
+        warmup = {"state": "loading", "seconds": 0.0, "error": ""}
+        FakeRetriever.created = 0
+        retriever = FakeRetriever(self.hits)
+        retriever.embedder = None          # 模型还没加载
+        app = create_app(retriever, None, raw_dir=self.raw, editor="code",
+                         warmup=warmup)
+
+        with TestClient(app) as client:
+            body = client.get("/api/health").json()
+            self.assertFalse(body["ready"])
+            self.assertTrue(body["index_ready"])       # 索引已经好了
+            self.assertEqual(body["warmup_state"], "loading")
+
+            warmup.update({"state": "ready", "seconds": 58.6})
+            retriever.embedder = object()
+            body = client.get("/api/health").json()
+
+        self.assertTrue(body["ready"])
+        self.assertEqual(body["warmup_state"], "ready")
+        self.assertEqual(body["warmup_seconds"], 58.6)
+
+    def test_health_reports_warmup_failure(self) -> None:
+        warmup = {"state": "failed", "seconds": 3.0, "error": "模型目录不存在"}
+        FakeRetriever.created = 0
+        retriever = FakeRetriever(self.hits)
+        retriever.embedder = None
+        app = create_app(retriever, None, raw_dir=self.raw, editor="code",
+                         warmup=warmup)
+        with TestClient(app) as client:
+            body = client.get("/api/health").json()
+
+        # 失败时不能报 ready：宁可显示「未就绪 + 原因」，也不要让人以为能用
+        self.assertFalse(body["ready"])
+        self.assertEqual(body["warmup_state"], "failed")
+        self.assertIn("模型目录不存在", body["warmup_error"])
+
+    # ---- 示例问题 ----
+
+    def test_examples_endpoint_returns_defaults(self) -> None:
+        app = self.build_app()
+        with TestClient(app) as client:
+            body = client.get("/api/examples").json()
+
+        examples = body["examples"]
+        self.assertTrue(examples)
+        self.assertLessEqual(len(examples), 4)
+        for item in examples:
+            self.assertTrue(item["q"].strip())
+            self.assertIn(item["mode"], ("search", "ask"))
+        # 问题不重复，否则点了两条结果是同一个
+        self.assertEqual(len({item["q"] for item in examples}), len(examples))
+        # 至少要有问答示例：只检索看不到引用链路
+        self.assertTrue(any(item["mode"] == "ask" for item in examples))
+
+    def test_examples_can_be_overridden(self) -> None:
+        custom = [{"q": "自定义问题", "mode": "search", "tag": "T"},
+                  {"q": "", "mode": "search"},          # 空问题要被丢掉
+                  {"q": "模式非法", "mode": "xxxx"},     # 非法模式也要丢
+                  {"q": "自定义问题", "mode": "ask"}]    # 重复问题去重
+        FakeRetriever.created = 0
+        app = create_app(FakeRetriever(self.hits), None, raw_dir=self.raw,
+                         editor="code", examples=custom)
+        with TestClient(app) as client:
+            examples = client.get("/api/examples").json()["examples"]
+
+        self.assertEqual([item["q"] for item in examples], ["自定义问题"])
+        self.assertEqual(examples[0]["mode"], "search")
 
     def test_health_reports_answerer(self) -> None:
         app = self.build_app(FakeAnswerer(make_answer(self.hits[0])))
@@ -1942,8 +2017,28 @@ class FrontendHtmlTests(unittest.TestCase):
         self.assertIn("url.searchParams.set('q', query)", self.script)
         self.assertIn("url.searchParams.set('mode', mode)", self.script)
         self.assertIn("new URLSearchParams(window.location.search)", self.script)
-        self.assertIn("if (initial.q)", self.script)   # 载入时自动复现查询
+        # 载入时自动复现查询；预热还没完成就先不发请求（会一直挂着）
+        self.assertIn("if (initial.q && state.health && state.health.ready)",
+                      self.script)
         self.assertIn("applyMode(initial.mode)", self.script)
+
+    def test_warmup_banner_contract(self) -> None:
+        """端口比模型先起来，页面必须能说明「在等什么」并轮询到就绪。"""
+        self.assertIn('id="warmup-banner"', self.html)
+        self.assertIn('id="warmup-text"', self.html)
+        self.assertIn("function renderWarmup()", self.script)
+        self.assertIn("function scheduleWarmupPoll()", self.script)
+        self.assertIn("health.warmup_state === 'failed'", self.script)
+        self.assertIn("state.warmupTimer", self.script)
+
+    def test_examples_contract(self) -> None:
+        """首屏示例：区域存在、数据来自后端、点击填词并直接跑。"""
+        self.assertIn('id="examples"', self.html)
+        self.assertIn('id="examples-list"', self.html)
+        self.assertIn("api('/api/examples')", self.script)
+        self.assertIn("function renderExamples()", self.script)
+        self.assertIn("function runExample(item)", self.script)
+        self.assertIn("input.value = item.q", self.script)
 
     def test_keyboard_shortcut_contract(self) -> None:
         self.assertIn("event.key === '/'", self.script)

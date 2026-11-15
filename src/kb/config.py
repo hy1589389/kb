@@ -181,6 +181,15 @@ class GenerateConfig:
     top_k: int = 5
     min_top_score: float = 0.0
     timeout: float = 60.0
+    # 单价（每百万 token，人民币元）。0 表示不换算成本，`/metrics` 里就不出现
+    # 成本指标 —— 宁可没有，也不要用一个猜的价格去乘出看起来精确的数。
+    # 单价会变，所以写在 config.toml 里，代码只留默认 0。
+    price_input_per_mtok: float = 0.0
+    price_output_per_mtok: float = 0.0
+    # 命中上下文缓存的输入 token 单价。DeepSeek 的 usage 里区分
+    # `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`，命中部分便宜一个
+    # 量级。填 0 表示不分档：所有输入 token 都按 price_input_per_mtok 算。
+    price_cache_hit_per_mtok: float = 0.0
 
     @classmethod
     def load(cls, config_path: Path | None = None) -> "GenerateConfig":
