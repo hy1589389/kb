@@ -456,6 +456,8 @@ class WebAppTests(TempCorpus):
         required = {
             "chunk_id", "rank", "score", "breadcrumb", "repo", "rel_path",
             "line_start", "line_end", "text", "abs_path",
+            # 分数的量纲和各路名次：hybrid 的 score 是 RRF 分，不能当相似度看
+            "score_kind", "sources",
         }
         for item in body["results"]:
             self.assertTrue(required <= set(item), required - set(item))
@@ -466,6 +468,21 @@ class WebAppTests(TempCorpus):
         self.assertEqual([r["rank"] for r in body["results"]], [1, 2, 3])
         self.assertEqual(body["results"][0]["rel_path"], "docs/hashmap.md")
         self.assertEqual(body["results"][0]["abs_path"], str(self.src.resolve()))
+
+    def test_search_exposes_score_kind_and_source_ranks(self) -> None:
+        """hybrid 的分数是 RRF 融合分；两路各排第几要一起给出去。"""
+        hit = make_hit(1)
+        hit.sources = {"dense": {"rank": 1, "score": 0.6229},
+                       "sparse": {"rank": 21, "score": 6.31}}
+        FakeRetriever.created = 0
+        app = create_app(FakeRetriever([hit]), None, raw_dir=self.raw,
+                         editor="code")
+        with TestClient(app) as client:
+            item = client.get("/api/search", params={"q": "HashMap"}).json()["results"][0]
+
+        self.assertEqual(item["score_kind"], "rrf")
+        self.assertEqual(item["sources"]["dense"], {"rank": 1, "score": 0.6229})
+        self.assertEqual(item["sources"]["sparse"]["rank"], 21)
 
     def test_search_truncates_long_text_but_keeps_full(self) -> None:
         app = self.build_app()
@@ -2039,6 +2056,15 @@ class FrontendHtmlTests(unittest.TestCase):
         self.assertIn("function renderExamples()", self.script)
         self.assertIn("function runExample(item)", self.script)
         self.assertIn("input.value = item.q", self.script)
+
+    def test_score_display_contract(self) -> None:
+        """分数按量纲显示：hybrid 是 RRF 分，不是相似度；并给出各路名次。"""
+        self.assertIn("function scoreLabel(item)", self.script)
+        self.assertIn("function sourceRanksText(item)", self.script)
+        self.assertIn("SCORE_LABEL", self.script)
+        self.assertIn("'source-ranks'", self.script)
+        # 裸 score 的旧写法不该再出现，否则又把 RRF 分当相似度显示
+        self.assertNotIn("function fmtScore(", self.script)
 
     def test_keyboard_shortcut_contract(self) -> None:
         self.assertIn("event.key === '/'", self.script)

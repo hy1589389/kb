@@ -564,7 +564,7 @@ class TestSearchHit(unittest.TestCase):
             set(d),
             {"chunk_id", "doc_id", "repo", "rel_path", "breadcrumb",
              "line_start", "line_end", "text", "score", "source", "rank",
-             "collection", "locator"},
+             "collection", "locator", "sources"},
         )
         back = SearchHit.from_dict(d)
         self.assertEqual(back, hit)
@@ -579,6 +579,19 @@ class TestSearchHit(unittest.TestCase):
         # 老版本的 JSON 里没有这两个字段，必须能读回来
         self.assertEqual(hit.collection, "")
         self.assertEqual(hit.locator, "")
+        self.assertEqual(hit.sources, {})
+
+    def test_sources_carry_rank_and_score_per_route(self):
+        """hybrid 的结果要能看出「两路各排第几」—— 光看 RRF 分看不出原因。"""
+        hit = SearchHit(
+            chunk_id="c", doc_id="d", repo="r", rel_path="p", breadcrumb="b",
+            line_start=1, line_end=2, text="t", score=0.0287, source="hybrid",
+            sources={"dense": {"rank": 1, "score": 0.6229},
+                     "sparse": {"rank": 21, "score": 6.31}},
+        )
+        self.assertEqual(hit.sources["dense"]["rank"], 1)
+        self.assertEqual(SearchHit.from_dict(hit.to_dict()).sources,
+                         hit.sources)
 
     def test_location(self):
         hit = SearchHit("c", "d", "JavaGuide", "docs/a.md", "", 3, 9, "t", 0.1, "dense")

@@ -357,6 +357,12 @@
     font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums;
   }
   .score { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .source-ranks {
+    color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums;
+    padding: 1px 7px; border: 1px solid var(--border); border-radius: 9px;
+    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    cursor: help;
+  }
   .location {
     margin-left: auto; color: var(--muted); font-size: 12px;
     font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
@@ -765,10 +771,46 @@
     return value.toLocaleString('en-US');
   }
 
-  function fmtScore(value) {
-    return typeof value === 'number' && isFinite(value)
-      ? 'score ' + value.toFixed(4)
-      : 'score ' + String(value);
+  /* 分数的量纲名。hybrid 下 score 是 RRF 融合分（1/(60+名次) 相加，
+     上限 2/61 ≈ 0.0328），只显示裸数字容易被当成「相似度很低」。 */
+  var SCORE_LABEL = { rrf: 'RRF 融合分', cosine: '余弦', bm25: 'BM25' };
+  var SCORE_TIP = {
+    rrf: 'RRF 融合分 = Σ 1/(60+名次)，两路都排第 1 时上限 2/61≈0.0328。'
+       + '数值本身没有绝对含义，只用来排序；看名次和来源更有意义。',
+    cosine: '稠密检索的余弦相似度（0~1，越大越像）',
+    bm25: 'BM25 分数，无上界，只在同一次查询内可比'
+  };
+
+  function scoreLabel(item) {
+    var kind = item.score_kind || 'score';
+    var name = SCORE_LABEL[kind] || '分数';
+    var value = typeof item.score === 'number' && isFinite(item.score)
+      ? item.score.toFixed(4)
+      : String(item.score);
+    return name + ' ' + value;
+  }
+
+  /* 各路的原始名次（含原始分），例如 "dense#1 · bm25#21"。
+     这是排查「为什么这条排在前面」的关键信息：RRF 分看不出来。 */
+  function sourceRanksText(item) {
+    var sources = item.sources || {};
+    var names = Object.keys(sources);
+    if (!names.length) return '';
+    return names.map(function (name) {
+      var info = sources[name] || {};
+      return name + '#' + (info.rank || 0);
+    }).join(' · ');
+  }
+
+  function sourceRanksTip(item) {
+    var sources = item.sources || {};
+    var parts = Object.keys(sources).map(function (name) {
+      var info = sources[name] || {};
+      var label = SCORE_LABEL[name === 'dense' ? 'cosine' : (name === 'sparse' ? 'bm25' : name)] || name;
+      return name + ' 第 ' + (info.rank || 0) + ' 名（' + label + ' '
+        + Number(info.score || 0).toFixed(4) + '）';
+    });
+    return parts.length ? '各路原始名次：' + parts.join('；') : '';
   }
 
   function fmtMb(value) {
@@ -1470,6 +1512,8 @@
       chunk_id: String(raw.chunk_id || ''),
       rank: Number(raw.rank) || 0,
       score: Number(raw.score) || 0,
+      score_kind: String(raw.score_kind || ''),
+      sources: (raw.sources && typeof raw.sources === 'object') ? raw.sources : {},
       collection: String(raw.collection || ''),
       breadcrumb: String(raw.breadcrumb || ''),
       repo: String(raw.repo || ''),
@@ -1517,7 +1561,15 @@
 
     var head = el('div', 'card-head');
     head.appendChild(el('span', 'rank', '#' + displayRank));
-    head.appendChild(el('span', 'score', fmtScore(item.score)));
+    var scoreChip = el('span', 'score', scoreLabel(item));
+    scoreChip.title = SCORE_TIP[item.score_kind] || '检索分数';
+    head.appendChild(scoreChip);
+    var ranksText = sourceRanksText(item);
+    if (ranksText) {
+      var ranksChip = el('span', 'source-ranks', ranksText);
+      ranksChip.title = sourceRanksTip(item);
+      head.appendChild(ranksChip);
+    }
     head.appendChild(el('span', 'location', locationOf(item)));
     card.appendChild(head);
 

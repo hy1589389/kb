@@ -608,15 +608,22 @@ class Retriever:
     def _part_rank(self, part: _IndexPart, query: str, qvec: np.ndarray | None,
                    use_dense: bool, use_sparse: bool,
                    include_low_quality: bool
-                   ) -> tuple[list[int], dict[int, float], str]:
+                   ) -> tuple[list[int], dict[int, float], str, dict[int, dict]]:
         """一个集合内部：dense / sparse 两路 -> RRF -> 名次列表。
 
         低质量块在这一层就过滤掉，不能等到融合之后：被过滤掉的块如果参与了
         名次计算，会把正常块往后挤，等于让垃圾数据占着名次不放。
+
+        返回 `(名次列表, 融合分, source, 每条的来源明细)`。明细形如
+        `{doc_index: {"dense": {"rank": 1, "score": 0.6229},
+                     "sparse": {"rank": 21, "score": 6.31}}}`，
+        用来回答「这条为什么排第一」—— hybrid 的 `score` 是 RRF 分，
+        只有 0.03 量级，光看它看不出名次从哪来。
         """
         rankings: list[list[int]] = []
         weights: list[float] = []
         raw_scores: dict[int, float] = {}
+        detail: dict[int, dict] = {}
         fusion_k = int(self.cfg["fusion_top_k"])
 
         if use_dense and qvec is not None:
@@ -626,6 +633,9 @@ class Retriever:
             rankings.append([i for i, _ in dense_hits])
             weights.append(float(self.cfg["dense_weight"]))
             raw_scores = dict(dense_hits)
+            for position, (doc, value) in enumerate(dense_hits, start=1):
+                detail.setdefault(doc, {})["dense"] = {"rank": position,
+                                                       "score": float(value)}
         if use_sparse:
             sparse_hits = part.bm25.search(query, top_k=int(self.cfg["sparse_top_k"]))
             if not include_low_quality:
@@ -634,15 +644,19 @@ class Retriever:
             weights.append(float(self.cfg["sparse_weight"]))
             if not use_dense:
                 raw_scores = dict(sparse_hits)
+            for position, (doc, value) in enumerate(sparse_hits, start=1):
+                detail.setdefault(doc, {})["sparse"] = {"rank": position,
+                                                        "score": float(value)}
 
         if len(rankings) == 1:
             # 只有一路时不做 RRF：直接用原始分数。余弦相似度和 BM25 分数
             # 各自都有意义，评测单路效果时要用原始分数；RRF 会把它压成
             # 1/(60+rank) 这种只有名次含义的数，信息量反而变少。
-            return rankings[0][:fusion_k], raw_scores, ("dense" if use_dense else "sparse")
+            return (rankings[0][:fusion_k], raw_scores,
+                    ("dense" if use_dense else "sparse"), detail)
 
         fused_all = rrf_fuse(rankings, k=int(self.cfg["rrf_k"]), weights=weights)
-        return ([i for i, _ in fused_all[:fusion_k]], dict(fused_all), "hybrid")
+        return ([i for i, _ in fused_all[:fusion_k]], dict(fused_all), "hybrid", detail)
 
     def search(self, query: str, top_k: int = 10, *, use_dense: bool = True,
                use_sparse: bool = True, use_rerank: bool = False,
@@ -672,10 +686,11 @@ class Retriever:
 
         if len(parts) == 1:
             part = parts[0]
-            order, scores, source = self._part_rank(
+            order, scores, source, detail = self._part_rank(
                 part, query, qvec, use_dense, use_sparse, include_low_quality
             )
-            hits = [self._to_hit(part, i, scores.get(i, 0.0), source, rank)
+            hits = [self._to_hit(part, i, scores.get(i, 0.0), source, rank,
+                                 detail.get(i))
                     for rank, i in enumerate(order, start=1)]
             if use_rerank:
                 hits = self._rerank(query, hits, final_k)
@@ -687,14 +702,17 @@ class Retriever:
         rankings: list[list[int]] = []
         weights_list: list[float] = []
         mapping: dict[int, tuple[_IndexPart, int]] = {}
+        details: dict[int, dict] = {}
         offset = 0
         for part in parts:
-            order, _scores, _source = self._part_rank(
+            order, _scores, _source, detail = self._part_rank(
                 part, query, qvec, use_dense, use_sparse, include_low_quality
             )
             rankings.append([offset + i for i in order])
             for i in order:
                 mapping[offset + i] = (part, i)
+                # 明细跟着全局 id 走，否则多集合时各行各路的名次会串
+                details[offset + i] = detail.get(i) or {}
             weights_list.append(self.collection_weight(part.name))
             offset += part.n_docs
 
@@ -703,14 +721,15 @@ class Retriever:
         for rank, (gid, score) in enumerate(
                 fused[:int(self.cfg["fusion_top_k"])], start=1):
             part, local_index = mapping[gid]
-            hits.append(self._to_hit(part, local_index, float(score), "hybrid", rank))
+            hits.append(self._to_hit(part, local_index, float(score), "hybrid", rank,
+                                     details.get(gid)))
 
         if use_rerank:
             hits = self._rerank(query, hits, final_k)
         return hits[:final_k]
 
     def _to_hit(self, part: _IndexPart, doc_index: int, score: float,
-                source: str, rank: int) -> SearchHit:
+                source: str, rank: int, sources: dict | None = None) -> SearchHit:
         m = part.meta[doc_index]
         return SearchHit(
             chunk_id=m.get("chunk_id", ""),
@@ -726,6 +745,7 @@ class Retriever:
             rank=rank,
             collection=part.collection_of(doc_index),
             locator=str(m.get("locator") or ""),
+            sources=dict(sources or {}),
         )
 
     def _rerank(self, query: str, hits: list[SearchHit], final_k: int) -> list[SearchHit]:

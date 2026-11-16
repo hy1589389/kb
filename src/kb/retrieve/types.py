@@ -6,7 +6,8 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
+from typing import Any
 
 __all__ = ["SearchHit"]
 
@@ -45,6 +46,11 @@ class SearchHit:
     rank: int = 0  # 1-based；0 表示还没排名
     collection: str = ""
     locator: str = ""
+    # 这一条在各路里的名次与原始分：{"dense": {"rank": 1, "score": 0.6229},
+    # "sparse": {"rank": 21, "score": 6.31}}。hybrid 下 `score` 是 RRF 融合分，
+    # 只有 0.03 量级、看绝对值没有意义；名次和原始分才能回答「为什么这条在前面」。
+    # 单路检索时只有对应那一路的键。
+    sources: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -65,6 +71,7 @@ class SearchHit:
             rank=int(d.get("rank", 0)),
             collection=d.get("collection", ""),
             locator=d.get("locator", ""),
+            sources=dict(d.get("sources") or {}),
         )
 
     def location(self) -> str:

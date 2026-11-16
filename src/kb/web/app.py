@@ -103,8 +103,24 @@ def _as_dict(hit: Any) -> dict:
     return {name: getattr(hit, name, None) for name in (
         "chunk_id", "repo", "rel_path", "breadcrumb",
         "line_start", "line_end", "text", "score", "source", "rank",
-        "collection", "locator",
+        "collection", "locator", "sources",
     )}
+
+
+def _score_kind(source: str) -> str:
+    """`source` -> 分数的量纲名。前端要按量纲显示，不能都叫 score。
+
+    hybrid 的分数是 RRF 融合分（1/(60+名次) 相加，上限 2/61 ≈ 0.0328），
+    看绝对值没有意义；单路检索才是余弦 / BM25 那种有意义的量。
+    """
+    normalized = (source or "").strip().lower()
+    if normalized == "hybrid":
+        return "rrf"
+    if normalized == "dense":
+        return "cosine"
+    if normalized == "sparse":
+        return "bm25"
+    return normalized or "score"
 
 
 def _mode_flags(mode: str) -> tuple[bool, bool]:
@@ -552,10 +568,23 @@ def create_app(retriever: Any, answerer: Any = None, *,
         text = str(data.get("text") or "")
         truncated = len(text) > TEXT_PREVIEW_CHARS
         path = resolve_source_path(data, raw_root)
+        source = str(data.get("source") or "")
+        # 每路的名次与原始分：hybrid 下光看 RRF 分看不出「为什么在前面」
+        sources: dict[str, dict] = {}
+        for name, info in (data.get("sources") or {}).items():
+            if not isinstance(info, dict):
+                continue
+            sources[str(name)] = {
+                "rank": int(info.get("rank") or 0),
+                "score": round(float(info.get("score") or 0.0), 4),
+            }
         return {
             "chunk_id": str(data.get("chunk_id") or ""),
             "rank": int(data.get("rank") or fallback_rank),
             "score": float(data.get("score") or 0.0),
+            # 分数属于哪个量纲：rrf / cosine / bm25
+            "score_kind": _score_kind(source),
+            "sources": sources,
             # 多集合：这条结果来自哪个集合。单索引老索引里可能是空串。
             "collection": str(data.get("collection") or ""),
             "breadcrumb": str(data.get("breadcrumb") or ""),
@@ -569,7 +598,7 @@ def create_app(retriever: Any, answerer: Any = None, *,
             "text_full": text if truncated else None,
             "text_chars": len(text),
             "truncated": truncated,
-            "source": str(data.get("source") or ""),
+            "source": source,
             "abs_path": str(path) if path is not None else None,
         }
 
